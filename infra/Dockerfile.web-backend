@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir uv
+COPY apps/web-backend/pyproject.toml apps/web-backend/pyproject.toml
+RUN uv pip install --system -e apps/web-backend
+COPY apps/web-backend apps/web-backend
+WORKDIR /app/apps/web-backend
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

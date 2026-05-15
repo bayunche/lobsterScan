@@ -1,0 +1,52 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+.pnpm-store/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Data & runtime（含 apps/*/data/ 这种各应用自带的本地数据目录）
+**/data/uploads/*
+**/data/outputs/*
+!**/data/uploads/.gitkeep
+!**/data/outputs/.gitkeep
+*.db
+*.db-journal
+
+# OpenClaw 私有目录与备份
+openclaw/agents/
+openclaw/.backups/
+openclaw/workspaces/
+~/.openclaw/
+
+# Claude Code 本地配置
+.claude/
+
+# 日志
+*.log
+
+# Skills cache
+skills/.cache/
+skills/third-party/*/
+!skills/third-party/.gitkeep
+
+# Temp Word lock files
+~$*.docx

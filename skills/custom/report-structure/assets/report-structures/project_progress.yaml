@@ -1,0 +1,26 @@
+report_type: project_progress
+chapters:
+  - chapter_no: 1
+    title: "封面"
+    type: cover
+    data_keys: []
+  - chapter_no: 2
+    title: "本周工作概览"
+    type: summary
+    data_keys: [summary, progress_status]
+  - chapter_no: 3
+    title: "本周完成"
+    type: completed
+    data_keys: [key_points, completed]
+  - chapter_no: 4
+    title: "当前问题与风险"
+    type: risks
+    data_keys: [risks]
+  - chapter_no: 5
+    title: "需要支持"
+    type: support
+    data_keys: [support_needed]
+  - chapter_no: 6
+    title: "下一步计划"
+    type: next_steps
+    data_keys: [next_steps]

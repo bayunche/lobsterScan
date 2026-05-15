@@ -1,0 +1,6 @@
+packages:
+  - apps/web-frontend
+  - apps/admin-frontend
+  - packages/ui
+  - packages/schemas
+  - packages/openclaw-client/ts

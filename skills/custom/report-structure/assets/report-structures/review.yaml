@@ -1,0 +1,9 @@
+report_type: review
+chapters:
+  - { chapter_no: 1, title: "封面",         type: cover,      data_keys: [] }
+  - { chapter_no: 2, title: "岗位职责",     type: duty,       data_keys: [duty] }
+  - { chapter_no: 3, title: "关键成果",     type: results,    data_keys: [key_points, key_data] }
+  - { chapter_no: 4, title: "管理动作",     type: actions,    data_keys: [management_actions] }
+  - { chapter_no: 5, title: "代表案例",     type: case,       data_keys: [case_studies] }
+  - { chapter_no: 6, title: "不足与改进",   type: improvement,data_keys: [improvements] }
+  - { chapter_no: 7, title: "下一阶段计划", type: next_steps, data_keys: [next_steps] }

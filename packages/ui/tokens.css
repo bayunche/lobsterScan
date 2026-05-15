@@ -1,0 +1,544 @@
+/* ───────────────────────────────────────────────────────────
+ * lobsterScan · 工程图纸 × 报章体 × 朱砂印
+ * 共享 design tokens · web-frontend + admin-frontend 共用
+ * ─────────────────────────────────────────────────────────── */
+
+:root {
+  /* === 色：米白纸 + 深墨 + 朱砂 (v2 微调，提升层次) === */
+  --paper:        oklch(0.985 0.004 85);   /* 主背景：略偏暖白 */
+  --paper-warm:   oklch(0.97 0.007 75);    /* 卡片底 */
+  --paper-fade:   oklch(0.945 0.010 80);
+  --paper-deep:   oklch(0.93 0.012 80);    /* 反差色块 */
+
+  --ink:          oklch(0.18 0.020 245);
+  --ink-soft:     oklch(0.38 0.020 245);
+  --ink-mute:     oklch(0.55 0.018 245);
+  --ink-dim:      oklch(0.72 0.012 245);
+
+  --line:         oklch(0.80 0.012 80);    /* 加深一点更可见 */
+  --line-soft:    oklch(0.88 0.008 80);
+  --line-thick:   oklch(0.45 0.018 250);
+
+  /* 朱砂 — 唯一强调色 */
+  --seal:         oklch(0.55 0.18 30);
+  --seal-deep:    oklch(0.45 0.19 28);
+  --seal-soft:    oklch(0.95 0.04 30);
+
+  /* 状态 */
+  --ok:           oklch(0.50 0.13 145);
+  --ok-soft:      oklch(0.93 0.05 145);
+  --warn:         oklch(0.65 0.15 65);
+  --warn-soft:    oklch(0.95 0.06 75);
+  --fail:         oklch(0.50 0.20 25);
+  --fail-soft:    oklch(0.94 0.05 25);
+  --mark:         oklch(0.85 0.12 95);
+
+  /* === 字 === */
+  --font-serif:
+    "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC",
+    "Songti SC", "STSong", "SimSun", Cambria, serif;
+  --font-sans:
+    "Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Berkeley Mono", "Fira Code",
+    ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* type scale - 报章式：display 与 body 拉开 */
+  --t-mono-xs:   0.6875rem;  /* 11 */
+  --t-mono-sm:   0.75rem;    /* 12 */
+  --t-xs:        0.75rem;
+  --t-sm:        0.8125rem;  /* 13 */
+  --t-base:      0.9375rem;  /* 15 */
+  --t-lg:        1.0625rem;  /* 17 */
+  --t-xl:        1.25rem;    /* 20 */
+  --t-2xl:       1.625rem;   /* 26 */
+  --t-3xl:       2.25rem;    /* 36 */
+  --t-4xl:       3rem;       /* 48 */
+  --t-5xl:       4.5rem;     /* 72 */
+
+  --leading-tight:  1.2;
+  --leading-snug:   1.4;
+  --leading-normal: 1.6;
+  --leading-loose:  1.85;
+
+  --tracking-wide:  0.06em;
+  --tracking-wider: 0.14em;
+
+  /* === 形 === */
+  --r-0: 0;
+  --r-1: 1px;
+  --r-2: 2px;
+  --r-4: 4px;
+  --r-pill: 999px;
+
+  --w-hair:  1px;
+  --w-rule:  2px;
+  --w-bar:   3px;
+
+  /* === 间距 === */
+  --s-1:   0.25rem;
+  --s-2:   0.5rem;
+  --s-3:   0.75rem;
+  --s-4:   1rem;
+  --s-5:   1.25rem;
+  --s-6:   1.5rem;
+  --s-8:   2rem;
+  --s-10:  2.5rem;
+  --s-12:  3rem;
+  --s-16:  4rem;
+  --s-20:  5rem;
+
+  /* === 阴影 === */
+  --shadow-paper:   0 1px 0 oklch(0.20 0.02 250 / 0.04);
+  --shadow-card:    0 1px 0 oklch(0.20 0.02 250 / 0.04),
+                    0 12px 24px -20px oklch(0.20 0.02 250 / 0.18);
+  --shadow-bubble:  0 1px 2px oklch(0.20 0.02 250 / 0.04),
+                    0 4px 16px -8px oklch(0.20 0.02 250 / 0.12);
+  --shadow-stamp:   inset 0 0 0 1px oklch(0.30 0.16 25 / 0.45),
+                    0 1px 2px oklch(0.30 0.16 25 / 0.18);
+  --shadow-elev:    0 2px 4px oklch(0.20 0.02 250 / 0.06),
+                    0 24px 48px -28px oklch(0.20 0.02 250 / 0.24);
+
+  /* === 动 === */
+  --ease:        cubic-bezier(.2, .6, .2, 1);
+  --ease-out:    cubic-bezier(.16, .9, .25, 1);
+  --t-fast:      120ms;
+  --t-base:      200ms;
+  --t-slow:      400ms;
+}
+
+/* === 基础排版 === */
+html { font-feature-settings: "ss01", "cv01", "tnum"; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--t-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 纸纹：极浅纵向竖纹（信笺感）+ 角落晕染 */
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent 31px,
+      oklch(0.85 0.012 80 / 0.18) 31px,
+      oklch(0.85 0.012 80 / 0.18) 32px
+    ),
+    radial-gradient(circle at 0% 0%, oklch(0.95 0.025 60 / 0.5) 0%, transparent 50%),
+    radial-gradient(circle at 100% 100%, oklch(0.94 0.020 240 / 0.4) 0%, transparent 50%);
+}
+
+/* === Utility classes === */
+.font-serif { font-family: var(--font-serif); }
+.font-sans  { font-family: var(--font-sans); }
+.font-mono  { font-family: var(--font-mono); }
+
+.ink       { color: var(--ink); }
+.ink-soft  { color: var(--ink-soft); }
+.ink-mute  { color: var(--ink-mute); }
+.ink-dim   { color: var(--ink-dim); }
+.cinnabar  { color: var(--seal); }
+.cinnabar-deep { color: var(--seal-deep); }
+
+/* 节标号、工号 */
+.serial {
+  font-family: var(--font-mono);
+  font-size: var(--t-mono-xs);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.serial-sm { font-size: 0.6rem; }
+
+/* 标题 */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+  color: var(--ink);
+}
+.display-lg { font-size: var(--t-4xl); }
+.display-md { font-size: var(--t-3xl); }
+.display-sm { font-size: var(--t-2xl); }
+
+/* 发丝线 */
+.hairline {
+  border: 0;
+  height: 1px;
+  background: var(--line);
+}
+.hairline-thick {
+  border: 0;
+  height: 2px;
+  background: var(--ink);
+}
+
+/* tick · 配准标记 */
+.tick {
+  display: inline-block;
+  width: 0.5em;
+  height: 1px;
+  background: var(--ink);
+  vertical-align: middle;
+  margin: 0 0.4em;
+}
+
+/* 配准十字 ⊕ */
+.regmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  color: var(--ink-mute);
+}
+.regmark::before, .regmark::after {
+  content: ""; position: absolute;
+  background: currentColor;
+}
+.regmark::before { left: 50%; top: 0; bottom: 0; width: 1px; transform: translateX(-50%); }
+.regmark::after  { top:  50%; left: 0; right: 0; height: 1px; transform: translateY(-50%); }
+
+/* === 印章 (seal stamp) — 篆刻风格 === */
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1em;
+  height: 2.1em;
+  background:
+    radial-gradient(circle at 30% 25%, oklch(0.62 0.20 30) 0%, transparent 45%),
+    radial-gradient(circle at 70% 75%, oklch(0.45 0.19 28) 0%, transparent 50%),
+    var(--seal);
+  color: var(--paper);
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 0.92em;
+  line-height: 1;
+  letter-spacing: 0;
+  border-radius: var(--r-2);
+  box-shadow:
+    inset 0 0 0 1px oklch(0.30 0.16 25 / 0.45),
+    inset 0 1px 0 oklch(0.95 0.06 40 / 0.18),
+    0 1px 2px oklch(0.30 0.16 25 / 0.22);
+  user-select: none;
+  flex-shrink: 0;
+  transform: rotate(-2deg);
+  position: relative;
+  transition: transform var(--t-base) var(--ease);
+}
+.seal::after {
+  /* 印泥不均的微噪点 */
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background-image:
+    radial-gradient(circle at 15% 90%, oklch(0.20 0 0 / 0.12) 0%, transparent 18%),
+    radial-gradient(circle at 88% 12%, oklch(0.20 0 0 / 0.10) 0%, transparent 14%);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.seal:hover { transform: rotate(0deg) scale(1.04); }
+.seal-ink {
+  background: var(--ink);
+  color: var(--paper-warm);
+  box-shadow:
+    inset 0 0 0 1px oklch(0.30 0.02 250 / 0.5),
+    inset 0 1px 0 oklch(0.90 0.01 250 / 0.10);
+}
+.seal-lg { width: 2.6em; height: 2.6em; font-size: 1.05em; }
+.seal-xl { width: 3.2em; height: 3.2em; font-size: 1.2em; }
+.seal-sm { width: 1.6em; height: 1.6em; font-size: 0.78em; }
+
+/* 印章变体：每位 agent 一个轻微旋转 */
+.seal[data-agent="coordinator"]    { transform: rotate(-2deg); }
+.seal[data-agent="material"]       { transform: rotate(1deg); }
+.seal[data-agent="point-extractor"]{ transform: rotate(-1deg); }
+.seal[data-agent="structure"]      { transform: rotate(2deg); }
+.seal[data-agent="upward-opt"]     { transform: rotate(-1.5deg); }
+.seal[data-agent="copywriter"]     { transform: rotate(1.2deg); }
+.seal[data-agent="html-designer"]  { transform: rotate(-2deg); }
+.seal[data-agent="video-producer"] { transform: rotate(0.8deg); }
+.seal[data-agent="reviewer"]       { transform: rotate(-1.2deg); }
+.seal[data-agent="user"]           { transform: rotate(2deg); }
+
+/* === 状态点 === */
+.dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.dot-on    { background: var(--ok); }
+.dot-run   { background: var(--seal); animation: dot-pulse 1.6s var(--ease) infinite; }
+.dot-warn  { background: var(--warn); }
+.dot-fail  { background: var(--fail); }
+.dot-off   { background: var(--ink-dim); }
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.55 0.18 30 / 0.3); }
+  50%      { opacity: 0.7; box-shadow: 0 0 0 4px oklch(0.55 0.18 30 / 0); }
+}
+
+/* === 卡片（直角发丝） === */
+.sheet {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+.sheet-pad { padding: var(--s-5) var(--s-6); }
+.sheet-pad-sm { padding: var(--s-4); }
+
+/* === 按钮 === */
+.btn-ink {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--s-2);
+  padding: 0.65rem 1.2rem;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-sans);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--ink);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: all var(--t-base) var(--ease);
+  position: relative;
+}
+.btn-ink:hover { background: var(--seal-deep); border-color: var(--seal-deep); }
+.btn-ink:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-seal {
+  background: var(--seal);
+  color: var(--paper);
+  border-color: var(--seal);
+}
+.btn-seal:hover { background: var(--seal-deep); border-color: var(--seal-deep); }
+
+.btn-line {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  padding: 0.45rem 0.9rem;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: all var(--t-base) var(--ease);
+}
+.btn-line:hover { border-color: var(--ink); }
+
+/* === 输入 === */
+.field-input,
+.field-textarea {
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 0.65rem 0.85rem;
+  font-family: var(--font-sans);
+  font-size: var(--t-base);
+  color: var(--ink);
+  transition: border-color var(--t-base) var(--ease);
+}
+.field-input:focus,
+.field-textarea:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px oklch(0.20 0.02 250 / 0.06);
+}
+.field-textarea { line-height: var(--leading-normal); resize: vertical; }
+
+/* === Chip === */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--t-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.chip:hover { border-color: var(--ink-soft); color: var(--ink); }
+.chip-on {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+/* === 兼容旧 tailwind class，让已有页面套上新 token 视觉 === */
+
+/* — 卡片：bg-white + rounded-* + border 自动变成纸色发丝卡 — */
+.rounded-2xl.bg-white,
+.rounded-xl.bg-white,
+.rounded-lg.bg-white {
+  background: var(--paper) !important;
+  box-shadow: var(--shadow-paper);
+}
+.rounded-2xl, .rounded-xl, .rounded-lg {
+  border-radius: var(--r-2) !important;        /* 直角 2px 风 */
+}
+.rounded-full { border-radius: var(--r-pill) !important; }
+
+/* — 边线 — */
+.border-neutral-200,
+.border-neutral-300 { border-color: var(--line) !important; }
+.border-neutral-100 { border-color: var(--line-soft) !important; }
+.border-dashed      { border-style: dashed !important; }
+
+/* — 背景 — */
+.bg-white           { background: var(--paper) !important; }
+.bg-neutral-50,
+.bg-neutral-50\/50  { background: var(--paper-warm) !important; }
+.bg-neutral-100     { background: var(--paper-fade) !important; }
+
+/* — 文字 — */
+.text-neutral-900,
+.text-neutral-800   { color: var(--ink) !important; }
+.text-neutral-700   { color: var(--ink) !important; }
+.text-neutral-600   { color: var(--ink-soft) !important; }
+.text-neutral-500   { color: var(--ink-mute) !important; }
+.text-neutral-400   { color: var(--ink-dim) !important; }
+
+/* — sky/blue 一律映射为 ink（主交互）/ seal（强调） — */
+.bg-sky-600         { background: var(--ink) !important; color: var(--paper) !important; }
+.bg-sky-600:hover   { background: var(--seal) !important; }
+.text-sky-600,
+.text-sky-700,
+.text-sky-500       { color: var(--seal) !important; }
+.bg-sky-50          { background: var(--seal-soft) !important; }
+.border-sky-400,
+.hover\:border-sky-400:hover { border-color: var(--ink) !important; }
+.border-sky-500,
+.border-sky-600     { border-color: var(--seal) !important; }
+
+/* — 状态色 — */
+.bg-emerald-50      { background: var(--ok-soft) !important; }
+.bg-emerald-500     { background: var(--ok) !important; }
+.text-emerald-700,
+.text-emerald-600   { color: var(--ok) !important; }
+.border-emerald-300 { border-color: var(--ok) !important; }
+.bg-amber-50        { background: var(--warn-soft) !important; }
+.bg-amber-500,
+.bg-amber-400       { background: var(--warn) !important; }
+.text-amber-700,
+.text-amber-600     { color: var(--warn) !important; }
+.bg-rose-50         { background: var(--fail-soft) !important; }
+.bg-rose-500        { background: var(--fail) !important; }
+.text-rose-700,
+.text-rose-600,
+.text-rose-500      { color: var(--fail) !important; }
+.border-rose-300    { border-color: var(--fail) !important; }
+
+/* — 按钮 / 输入 — */
+button:not([class*="cta"]):not([class*="btn-"]):not([class*="chip"]):not([class*="seal"]):not([class*="dot"]):not([class*="cp-"]):not([class*="submit"]):not([class*="hamb"]):not([class*="file-x"]):not([class*="mount-"]):not([class*="mo-"]):not([class*="mbr"]):not([class*="link"]):not([class*="back"]) {
+  font-family: var(--font-sans);
+}
+
+/* — 表格 — */
+.bg-white table thead {
+  background: var(--paper-warm) !important;
+  color: var(--ink-mute);
+  font-family: var(--font-mono);
+  font-size: var(--t-mono-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.bg-white table thead th {
+  font-weight: 500;
+  font-family: var(--font-mono);
+  padding: 0.55rem 1rem !important;
+}
+.bg-white table tbody tr {
+  border-top: 1px solid var(--line-soft) !important;
+}
+.bg-white table tbody td {
+  font-size: var(--t-sm);
+  padding: 0.7rem 1rem !important;
+}
+
+/* — 标题字号统一升级 — */
+h1.text-2xl,
+.text-2xl.font-semibold {
+  font-family: var(--font-serif);
+  font-size: var(--t-2xl) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em;
+}
+
+/* — hover 视觉一致 — */
+.hover\:border-sky-400:hover,
+.hover\:border-neutral-300:hover,
+.hover\:border-neutral-400:hover {
+  border-color: var(--ink) !important;
+}
+
+/* — Pre / code 块 — */
+pre, code {
+  font-family: var(--font-mono) !important;
+  font-size: var(--t-mono-sm) !important;
+}
+pre.bg-white {
+  background: var(--paper-warm) !important;
+  border-color: var(--line) !important;
+}
+
+/* === Tag (square) === */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--t-mono-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  background: var(--paper-fade);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+}
+.tag-ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok); }
+.tag-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.tag-fail { background: var(--fail-soft); color: var(--fail); border-color: var(--fail); }
+.tag-seal { background: var(--seal-soft); color: var(--seal); border-color: var(--seal); }
+
+/* === 进入动画 === */
+@keyframes ink-rise {
+  from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.animate-ink-rise {
+  animation: ink-rise var(--t-slow) var(--ease-out) both;
+}
+
+@keyframes type-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-type {
+  animation: type-in var(--t-base) var(--ease) both;
+}
+
+/* === 滚动条（克制） === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-mute); }
+
+/* 选区 */
+::selection {
+  background: var(--seal);
+  color: var(--paper);
+}

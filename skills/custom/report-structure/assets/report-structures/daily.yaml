@@ -1,0 +1,8 @@
+report_type: daily
+chapters:
+  - { chapter_no: 1, title: "封面",         type: cover,      data_keys: [] }
+  - { chapter_no: 2, title: "本周概览",     type: summary,    data_keys: [summary, progress_status] }
+  - { chapter_no: 3, title: "完成事项",     type: completed,  data_keys: [completed, key_points] }
+  - { chapter_no: 4, title: "进行中事项",   type: in_progress,data_keys: [in_progress] }
+  - { chapter_no: 5, title: "问题与诉求",   type: risks,      data_keys: [risks, support_needed] }
+  - { chapter_no: 6, title: "下周计划",     type: next_steps, data_keys: [next_steps] }

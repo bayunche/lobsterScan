@@ -1,0 +1,806 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import ChatSidePanel from "@/components/ChatSidePanel";
+
+type Attachment = {
+  file_id: string;
+  filename: string;
+  size: number;
+  mime: string;
+  url: string;
+};
+
+type ReportMeta = {
+  title: string;
+  audience: string;
+  duration: string;
+  style: string;
+  report_type: string;
+  preview?: string;
+};
+
+type ChatMsg = {
+  id: string;
+  agent: string;
+  display_name: string;
+  seal: string;
+  ts: number;
+  kind: "user" | "intro" | "result" | "system";
+  text: string;
+  tokens?: number;
+  attachments?: Attachment[];
+  task_id?: string;
+  report_meta?: ReportMeta;
+};
+
+const MEMBERS = [
+  { id: "coordinator",     name: "汇报总控",   seal: "调" },
+  { id: "material",        name: "资料员",     seal: "料" },
+  { id: "point-extractor", name: "分析师",     seal: "析" },
+  { id: "structure",       name: "结构师",     seal: "纲" },
+  { id: "upward-opt",      name: "表达教练",   seal: "译" },
+  { id: "copywriter",      name: "文书",       seal: "文" },
+  { id: "html-designer",   name: "设计师",     seal: "设" },
+  { id: "video-producer",  name: "视频制作",   seal: "影" },
+  { id: "reviewer",        name: "质量检查员", seal: "校" },
+];
+
+const SESSION_KEY = "lobster-chat-session";
+
+function initialMessages(): ChatMsg[] {
+  const now = Math.floor(Date.now() / 1000);
+  return [
+    { id: "sys-welcome", agent: "system", display_name: "系统", seal: "·",
+      ts: now, kind: "system",
+      text: "九位常驻成员已加入会议室。直接说话，或 @ 某位单聊。" },
+    { id: "intro-coordinator", agent: "coordinator", display_name: "汇报总控", seal: "调",
+      ts: now, kind: "intro",
+      text: "我是总控。要做汇报材料就说一声，或者随便聊聊也行。" },
+    { id: "intro-material", agent: "material", display_name: "资料员", seal: "料",
+      ts: now + 1, kind: "intro",
+      text: "扔给我任何工作记录 / 表格 / 截图，我能拆成结构化素材池。" },
+    { id: "intro-point-extractor", agent: "point-extractor", display_name: "分析师", seal: "析",
+      ts: now + 2, kind: "intro",
+      text: "要「讲到点子上」就找我。我挑领导真正关心的几条重点。" },
+    { id: "intro-reviewer", agent: "reviewer", display_name: "质量检查员", seal: "校",
+      ts: now + 3, kind: "intro",
+      text: "成稿后我做最后一轮检查，给可执行的改进建议。" },
+  ];
+}
+
+export default function HomePage() {
+  const router = useRouter();
+  const [sid, setSid] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    let s = sessionStorage.getItem(SESSION_KEY);
+    if (!s) {
+      s = "ses_" + Math.random().toString(36).slice(2, 14);
+      sessionStorage.setItem(SESSION_KEY, s);
+    }
+    setSid(s);
+  }, []);
+
+  useEffect(() => {
+    if (!sid) return;
+    fetch(`/api/cluster/chat/${sid}/messages`).then(r => r.json()).then(d => {
+      const fromServer: ChatMsg[] = d.messages || [];
+      setMessages(fromServer.length > 0 ? fromServer : initialMessages());
+    }).catch(() => setMessages(initialMessages()));
+
+    const es = new EventSource(`/api/cluster/chat/${sid}/events`);
+    es.addEventListener("chat.message", (e) => {
+      const m = JSON.parse((e as MessageEvent).data);
+      setMessages(cur => cur.find(x => x.id === m.id) ? cur : [...cur, m]);
+    });
+    es.addEventListener("chat.message.update", (e) => {
+      const m = JSON.parse((e as MessageEvent).data);
+      setMessages(cur => cur.map(x => x.id === m.id ? m : x));
+    });
+    return () => es.close();
+  }, [sid, router]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length]);
+
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+  }, [draft]);
+
+  async function send(text?: string) {
+    const t = (text ?? draft).trim();
+    if (!t || sending || !sid) return;
+    setSending(true);
+    setDraft("");
+    try {
+      await fetch("/api/cluster/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: t, session_id: sid }),
+      });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="page-bg">
+      <div className="hall">
+        <header className="hall-head">
+          <div className="head-top">
+            <div className="brand-row">
+              <span className="brand-mark">🦞</span>
+              <div>
+                <div className="brand-name">龙虾集群</div>
+                <div className="brand-sub serial">OPENCLAW · 9 AGENTS · LIVE</div>
+              </div>
+            </div>
+          </div>
+          <div className="strip-wrap">
+            <div className="member-strip">
+              {MEMBERS.map((m) => (
+                <button
+                  key={m.id}
+                  className="mbr"
+                  title={`@${m.name}`}
+                  onClick={() => setDraft((d) => (d ? d + " " : "") + `@${m.name} `)}
+                >
+                  <span className="seal seal-sm" data-agent={m.id}>{m.seal}</span>
+                  <span className="mbr-name">{m.name}</span>
+                  <span className="dot dot-on mbr-dot" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <div className="middle">
+          <section className="conv" ref={scrollRef}>
+            <div className="conv-inner">
+              {messages.map((m, i) => (
+                <Bubble key={m.id} msg={m} prev={messages[i - 1]} />
+              ))}
+              {messages.length === 0 && (
+                <div className="conv-load serial">·· LOADING ··</div>
+              )}
+            </div>
+          </section>
+          <ChatSidePanel />
+        </div>
+
+        <footer className="composer">
+          <div className="composer-pad">
+            <button
+              className="cp-icon"
+              onClick={() => router.push("/feat/report")}
+              title="上传材料，触发汇报生成"
+            >
+              📂
+            </button>
+            <textarea
+              ref={taRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // 桌面: Cmd/Ctrl+Enter 发送；手机/触屏: 没有快捷键，靠按钮
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              rows={1}
+              placeholder="跟集群说点啥 — 闲聊 / 工作记录 / 提问"
+              className="cp-input"
+            />
+            <button
+              onClick={() => send()}
+              disabled={!draft.trim() || sending}
+              className="cp-send"
+            >
+              <span>{sending ? "发送中" : "发送"}</span>
+              <span className="serial cp-hint">⌘⏎</span>
+            </button>
+          </div>
+          <div className="cp-meta serial">
+            <span>SESSION · {(sid || "—").slice(0, 14)}</span>
+            <span className="cp-meta-r">
+              <span className="dot dot-on" /> 9 / 9 在线
+            </span>
+          </div>
+        </footer>
+      </div>
+
+      <style jsx>{`
+        .page-bg {
+          min-height: 100vh;
+          display: flex;
+          justify-content: center;
+        }
+        .hall {
+          width: 100%;
+          max-width: 1280px;
+          display: grid;
+          grid-template-rows: auto 1fr auto;
+          height: 100vh;
+          min-width: 0;
+        }
+        .middle {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 304px;
+          min-height: 0;
+          overflow: hidden;
+        }
+        @media (max-width: 1024px) {
+          .middle { grid-template-columns: minmax(0, 1fr) 272px; }
+        }
+        @media (max-width: 880px) {
+          .middle { grid-template-columns: minmax(0, 1fr); }
+          :global(.side) { display: none; }
+        }
+        .hall-head {
+          display: flex;
+          flex-direction: column;
+          gap: 0.9rem;
+          padding: 1.1rem 1.75rem 0.85rem;
+          border-bottom: 1px solid var(--line);
+          background: linear-gradient(180deg, var(--paper) 0%, oklch(0.99 0.003 80) 100%);
+          min-width: 0;
+        }
+        .head-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1.5rem;
+          min-width: 0;
+        }
+        .brand-row {
+          display: flex; align-items: center; gap: 0.75rem;
+          min-width: 0;
+        }
+        .brand-mark { font-size: 1.65rem; filter: saturate(0.7) brightness(0.95); }
+        .brand-name {
+          font-family: var(--font-serif);
+          font-size: var(--t-xl);
+          font-weight: 600;
+          color: var(--ink);
+          line-height: 1;
+        }
+        .brand-sub {
+          color: var(--ink-mute);
+          font-size: 0.62rem;
+          margin-top: 4px;
+          letter-spacing: 0.16em;
+        }
+        .strip-wrap {
+          position: relative;
+          margin: 0 -1.75rem;             /* 撑到 header 边缘 */
+        }
+        .strip-wrap::before,
+        .strip-wrap::after {
+          content: "";
+          position: absolute; top: 0; bottom: 4px; width: 28px;
+          pointer-events: none;
+          z-index: 1;
+        }
+        .strip-wrap::before {
+          left: 0;
+          background: linear-gradient(90deg, var(--paper) 0%, transparent 100%);
+        }
+        .strip-wrap::after {
+          right: 0;
+          background: linear-gradient(270deg, var(--paper) 0%, transparent 100%);
+        }
+        .member-strip {
+          display: flex; gap: 0.55rem;
+          overflow-x: auto;
+          padding: 0 1.75rem 6px;
+          scrollbar-width: thin;
+          scroll-snap-type: x proximity;
+        }
+        .member-strip::-webkit-scrollbar { height: 4px; }
+        .member-strip::-webkit-scrollbar-thumb {
+          background: var(--line);
+          border-radius: var(--r-pill);
+        }
+        .member-strip::-webkit-scrollbar-thumb:hover { background: var(--ink-mute); }
+        :global(.mbr) {
+          display: flex; align-items: center; gap: 0.45rem;
+          padding: 0.3rem 0.7rem 0.3rem 0.35rem;
+          background: var(--paper-warm);
+          border: 1px solid var(--line-soft);
+          border-radius: var(--r-pill);
+          flex-shrink: 0;
+          cursor: pointer;
+          transition: all var(--t-fast) var(--ease);
+          position: relative;
+          scroll-snap-align: start;
+          white-space: nowrap;
+        }
+        :global(.mbr:hover) {
+          border-color: var(--ink-soft);
+          background: var(--paper);
+          transform: translateY(-1px);
+          box-shadow: 0 2px 8px oklch(0.20 0.02 250 / 0.07);
+        }
+        :global(.mbr-name) {
+          font-size: 0.78rem;
+          color: var(--ink-soft);
+        }
+        :global(.mbr-dot) {
+          position: absolute;
+          top: 4px; right: 5px;
+        }
+
+
+        .conv {
+          overflow-y: auto;
+          padding: 1.5rem 1.75rem 1rem;
+          min-width: 0;
+        }
+        .conv-inner {
+          max-width: 760px;
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+          gap: 0.85rem;
+        }
+        .conv-load { color: var(--ink-mute); text-align: center; padding: 3rem 0; }
+
+        .composer {
+          padding: 0.85rem 1.75rem 1.1rem;
+          border-top: 1px solid var(--line);
+          background: var(--paper);
+        }
+        .composer-pad {
+          max-width: 760px; margin: 0 auto;
+          display: flex; align-items: flex-end; gap: 0.6rem;
+          background: var(--paper-warm);
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 0.5rem 0.5rem 0.5rem 0.65rem;
+          box-shadow: 0 1px 0 oklch(0.20 0.02 250 / 0.03),
+                      0 4px 16px -12px oklch(0.20 0.02 250 / 0.14);
+          transition: border-color var(--t-base) var(--ease), background var(--t-base) var(--ease);
+        }
+        .composer-pad:focus-within {
+          border-color: var(--ink-soft);
+          background: var(--paper);
+        }
+        :global(.cp-icon) {
+          flex-shrink: 0;
+          width: 36px; height: 36px;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: transparent; border: 1px solid var(--line);
+          border-radius: var(--r-2);
+          font-size: 1rem;
+          cursor: pointer;
+          transition: all var(--t-fast) var(--ease);
+        }
+        :global(.cp-icon:hover) { border-color: var(--ink); background: var(--paper); }
+        :global(.cp-input) {
+          flex: 1;
+          background: transparent;
+          border: 0;
+          outline: none;
+          padding: 0.55rem 0.5rem;
+          font-family: var(--font-sans);
+          font-size: 0.95rem;
+          color: var(--ink);
+          resize: none;
+          min-height: 40px;
+          max-height: 220px;
+          line-height: 1.5;
+        }
+        :global(.cp-input::placeholder) { color: var(--ink-mute); }
+        :global(.cp-send) {
+          flex-shrink: 0;
+          background: var(--ink);
+          color: var(--paper);
+          border: 0;
+          padding: 0.6rem 1.1rem;
+          border-radius: var(--r-2);
+          font-family: var(--font-sans);
+          font-size: var(--t-sm);
+          cursor: pointer;
+          display: inline-flex; align-items: center; gap: 0.6rem;
+          transition: all var(--t-base) var(--ease);
+        }
+        :global(.cp-send:hover:not(:disabled)) { background: var(--seal); }
+        :global(.cp-send:disabled) { opacity: 0.35; cursor: not-allowed; }
+        :global(.cp-hint) { color: var(--paper); opacity: 0.55; }
+
+        .cp-meta {
+          max-width: 760px; margin: 0.5rem auto 0;
+          display: flex; justify-content: space-between;
+          color: var(--ink-mute);
+        }
+        .cp-meta-r { display: inline-flex; align-items: center; gap: 4px; }
+
+        /* ───── 响应式 ───── */
+        @media (max-width: 880px) {
+          .hall-head { padding: 0.9rem 1rem 0.7rem; }
+          .strip-wrap { margin: 0 -1rem; }
+          :global(.member-strip) { padding: 0 1rem 6px; }
+          .conv { padding: 1.1rem 1rem 0.8rem; }
+          .composer { padding: 0.7rem 1rem 0.9rem; }
+        }
+        @media (max-width: 640px) {
+          .brand-name { font-size: var(--t-lg); }
+          .brand-sub { display: none; }
+          .brand-mark { font-size: 1.35rem; }
+          .hall-head { gap: 0.6rem; }
+          .conv-inner { gap: 0.7rem; }
+          :global(.cp-input) { font-size: 0.9rem; min-height: 36px; }
+          :global(.cp-send) { padding: 0.5rem 0.9rem; gap: 0; }
+          :global(.cp-hint) { display: none; }                    /* 隐 ⌘⏎ 提示 */
+          :global(.cp-icon) { width: 32px; height: 32px; font-size: 0.9rem; }
+          .cp-meta { font-size: 0.62rem; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
+  const isUser = msg.agent === "user";
+  const isSystem = msg.agent === "system";
+  const sameAgent = prev && prev.agent === msg.agent && msg.kind !== "system" && !isUser;
+
+  if (isSystem) {
+    const hasMeta = msg.report_meta || (msg.attachments && msg.attachments.length);
+
+    // 富系统消息：含 report_meta / attachments 时用卡片样式
+    if (hasMeta) {
+      return (
+        <div className="bb-launch animate-ink-rise">
+          <div className="bb-launch-head">
+            <span className="seal seal-sm" data-agent="user">{msg.seal}</span>
+            <span className="serial">你 · {fmtTs(msg.ts)} · 启动了功能</span>
+            {msg.task_id && (
+              <Link href={`/tasks/${msg.task_id}`} className="bb-launch-link">
+                查看任务 →
+              </Link>
+            )}
+          </div>
+          <div className="bb-launch-body">
+            <div className="bb-launch-title">{msg.report_meta?.title || msg.text}</div>
+            {msg.report_meta && (
+              <div className="bb-launch-tags">
+                <span className="tag">{reportTypeLabel(msg.report_meta.report_type)}</span>
+                <span className="tag">{msg.report_meta.audience}</span>
+                <span className="tag">{msg.report_meta.duration}</span>
+                <span className="tag">{msg.report_meta.style}</span>
+              </div>
+            )}
+            {msg.report_meta?.preview && (
+              <div className="bb-launch-preview">{msg.report_meta.preview}{msg.report_meta.preview.length >= 200 ? "…" : ""}</div>
+            )}
+            {msg.attachments && msg.attachments.length > 0 && (
+              <div className="bb-att">
+                <div className="serial bb-att-label">附件 · {msg.attachments.length}</div>
+                <div className="bb-att-grid">
+                  {msg.attachments.map((a) => (
+                    <Attach key={a.file_id} a={a} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <style jsx>{`
+            .bb-launch {
+              border: 1px solid var(--line);
+              background: var(--paper-warm);
+              border-radius: 12px;
+              padding: 0.85rem 1rem;
+              box-shadow: var(--shadow-bubble);
+              max-width: 92%;
+              align-self: center;
+              width: 100%;
+            }
+            .bb-launch-head {
+              display: flex; align-items: center; gap: 0.5rem;
+              font-size: var(--t-sm);
+              color: var(--ink-mute);
+              padding-bottom: 0.5rem;
+              border-bottom: 1px dashed var(--line-soft);
+              margin-bottom: 0.6rem;
+            }
+            :global(.bb-launch-head .seal) { font-size: 0.55em; transform: rotate(-3deg); }
+            :global(.bb-launch-link) {
+              margin-left: auto;
+              color: var(--ink);
+              text-decoration: none;
+              border-bottom: 1px solid var(--ink);
+              padding-bottom: 1px;
+            }
+            :global(.bb-launch-link:hover) { color: var(--seal); border-color: var(--seal); }
+            .bb-launch-body { display: flex; flex-direction: column; gap: 0.5rem; }
+            .bb-launch-title {
+              font-family: var(--font-serif);
+              font-size: var(--t-lg);
+              color: var(--ink);
+            }
+            .bb-launch-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+            .bb-launch-preview {
+              font-size: var(--t-sm);
+              color: var(--ink-soft);
+              line-height: 1.55;
+              padding: 0.5rem 0.65rem;
+              background: var(--paper);
+              border: 1px solid var(--line-soft);
+              border-radius: var(--r-2);
+            }
+            .bb-att { margin-top: 0.3rem; }
+            :global(.bb-att-label) { color: var(--ink-mute); margin-bottom: 0.4rem; }
+            :global(.bb-att-grid) {
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+              gap: 0.4rem;
+            }
+          `}</style>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bb-sys animate-ink-rise">
+        <span className="bb-sys-tick" />
+        <span className="serial">{msg.text}</span>
+        <span className="bb-sys-tick" />
+        <style jsx>{`
+          .bb-sys {
+            display: flex; align-items: center; gap: 0.75rem;
+            justify-content: center;
+            padding: 0.8rem 0 0.4rem;
+            color: var(--ink-mute);
+          }
+          .bb-sys-tick { height: 1px; width: 36px; background: var(--line); }
+          :global(.bb-sys .serial) {
+            font-size: 0.7rem;
+            color: var(--ink-mute);
+            letter-spacing: 0.08em;
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (isUser) {
+    return (
+      <div className="bb-user animate-ink-rise">
+        <div className="bb-user-body">{msg.text}</div>
+        <div className="bb-user-meta serial">
+          <span>{fmtTs(msg.ts)}</span>
+          <span>你</span>
+          <span className="seal seal-sm" data-agent="user">{msg.seal}</span>
+        </div>
+        <style jsx>{`
+          .bb-user {
+            align-self: flex-end;
+            max-width: 78%;
+            display: flex; flex-direction: column;
+            align-items: flex-end; gap: 0.35rem;
+          }
+          .bb-user-body {
+            background: var(--ink);
+            color: var(--paper);
+            padding: 0.85rem 1.1rem;
+            border-radius: 1.1rem 1.1rem 0.25rem 1.1rem;
+            font-size: 0.95rem;
+            line-height: 1.55;
+            box-shadow: var(--shadow-bubble);
+            white-space: pre-wrap;
+          }
+          .bb-user-meta {
+            display: flex; align-items: center; gap: 0.45rem;
+            color: var(--ink-mute);
+          }
+          :global(.bb-user .seal) { transform: rotate(2deg); }
+        `}</style>
+      </div>
+    );
+  }
+
+  return (
+    <article className={"bb-agent animate-ink-rise" + (sameAgent ? " bb-cont" : "")}>
+      {!sameAgent && (
+        <span className="seal" data-agent={msg.agent}>{msg.seal}</span>
+      )}
+      {sameAgent && <span className="bb-spacer" />}
+      <div className="bb-body-col">
+        {!sameAgent && (
+          <header className="bb-head">
+            <span className="bb-name">{msg.display_name}</span>
+            <span className="serial bb-id">{idShort(msg.agent)}</span>
+            <span className="bb-rule" />
+            <span className="serial bb-ts">{fmtTs(msg.ts)}</span>
+            {msg.tokens ? <span className="serial">{msg.tokens.toLocaleString()} TOK</span> : null}
+          </header>
+        )}
+        <div className={"bb-body" + (msg.kind === "intro" ? " bb-intro" : "") + (msg.text === "…" ? " bb-typing" : "")}>
+          {msg.text === "…" ? <TypingDots /> : msg.text}
+        </div>
+      </div>
+      <style jsx>{`
+        .bb-agent {
+          display: flex; gap: 0.65rem;
+          align-items: flex-start;
+        }
+        :global(.bb-agent .seal) { margin-top: 0.15rem; flex-shrink: 0; }
+        .bb-spacer { width: 2.1em; flex-shrink: 0; }
+        .bb-body-col {
+          flex: 1; min-width: 0;
+          display: flex; flex-direction: column;
+          gap: 0.3rem;
+          max-width: 78%;
+        }
+        .bb-head {
+          display: flex; align-items: baseline; gap: 0.45rem;
+          line-height: 1;
+        }
+        .bb-name {
+          font-family: var(--font-serif);
+          font-size: 0.92rem;
+          font-weight: 600;
+          color: var(--ink);
+        }
+        :global(.bb-head .bb-id),
+        :global(.bb-head .bb-ts) { color: var(--ink-mute); }
+        .bb-rule {
+          flex: 1;
+          height: 1px;
+          background: var(--line-soft);
+          margin: 0 0.25rem;
+          align-self: center;
+        }
+        .bb-body {
+          background: var(--paper-warm);
+          border: 1px solid var(--line-soft);
+          padding: 0.8rem 1rem;
+          border-radius: 0.25rem 1.1rem 1.1rem 1.1rem;
+          font-size: 0.95rem;
+          line-height: 1.6;
+          color: var(--ink);
+          white-space: pre-wrap;
+          box-shadow: var(--shadow-bubble);
+        }
+        .bb-cont .bb-body { border-top-left-radius: 1.1rem; }
+        .bb-intro {
+          background: transparent;
+          border-style: dashed;
+          color: var(--ink-soft);
+        }
+        .bb-typing { padding: 0.9rem 1rem; }
+      `}</style>
+    </article>
+  );
+}
+
+function TypingDots() {
+  return (
+    <span className="td">
+      <span /><span /><span />
+      <style jsx>{`
+        .td { display: inline-flex; gap: 5px; align-items: center; }
+        .td > span {
+          width: 5px; height: 5px; border-radius: 50%;
+          background: var(--ink-mute);
+          animation: tdot 1.2s infinite var(--ease);
+        }
+        .td > span:nth-child(2) { animation-delay: 0.15s; }
+        .td > span:nth-child(3) { animation-delay: 0.30s; }
+        @keyframes tdot {
+          0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+          40% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+    </span>
+  );
+}
+
+function fmtTs(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString("zh-CN", { hour12: false });
+}
+function idShort(agent: string): string {
+  return ({
+    coordinator: "AGT-01", material: "AGT-02", "point-extractor": "AGT-03",
+    structure: "AGT-04", "upward-opt": "AGT-05", copywriter: "AGT-06",
+    "html-designer": "AGT-07", "video-producer": "AGT-08", reviewer: "AGT-09",
+  } as Record<string, string>)[agent] || agent.toUpperCase().slice(0, 8);
+}
+
+function reportTypeLabel(t: string): string {
+  return ({
+    daily: "日常工作汇报", project_progress: "项目进度汇报",
+    review: "基层管理述职", introduction: "工作介绍",
+  } as Record<string, string>)[t] || t;
+}
+
+function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function iconForMime(mime: string, filename: string): string {
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  if (mime.startsWith("image/"))  return "🖼";
+  if (mime.startsWith("audio/"))  return "🎵";
+  if (mime.startsWith("video/"))  return "🎬";
+  if (mime.startsWith("text/"))   return "📄";
+  if (["pdf"].includes(ext))                                         return "📕";
+  if (["doc", "docx"].includes(ext))                                 return "📘";
+  if (["xls", "xlsx", "csv"].includes(ext))                          return "📗";
+  if (["ppt", "pptx"].includes(ext))                                 return "📙";
+  if (["zip", "rar", "7z", "tar", "gz", "bz2"].includes(ext))        return "🗜";
+  if (["json", "yaml", "yml", "xml", "html", "md", "log"].includes(ext)) return "📄";
+  return "📎";
+}
+
+function Attach({ a }: { a: Attachment }) {
+  const icon = iconForMime(a.mime, a.filename);
+  const isImg = a.mime.startsWith("image/");
+  return (
+    <a href={a.url} target="_blank" rel="noreferrer" className="att" title={`${a.filename} · ${bytes(a.size)}`}>
+      {isImg ? (
+        <span className="att-thumb">
+          <img src={a.url} alt={a.filename} />
+        </span>
+      ) : (
+        <span className="att-icon">{icon}</span>
+      )}
+      <span className="att-body">
+        <span className="att-name">{a.filename}</span>
+        <span className="serial att-size">{bytes(a.size)}</span>
+      </span>
+      <style jsx>{`
+        .att {
+          display: flex; align-items: center; gap: 0.55rem;
+          padding: 0.45rem 0.55rem;
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-radius: var(--r-2);
+          text-decoration: none;
+          color: var(--ink);
+          transition: border-color var(--t-base) var(--ease);
+          min-width: 0;
+        }
+        .att:hover { border-color: var(--ink); }
+        .att-icon, .att-thumb {
+          flex-shrink: 0;
+          width: 32px; height: 32px;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: var(--paper-warm);
+          border: 1px solid var(--line-soft);
+          border-radius: var(--r-2);
+          font-size: 1.05rem;
+          overflow: hidden;
+        }
+        .att-thumb :global(img) {
+          width: 100%; height: 100%; object-fit: cover;
+        }
+        .att-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .att-name {
+          font-size: var(--t-sm);
+          color: var(--ink);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        :global(.att-size) { color: var(--ink-mute); }
+      `}</style>
+    </a>
+  );
+}

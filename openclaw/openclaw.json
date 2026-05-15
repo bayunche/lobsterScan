@@ -1,0 +1,95 @@
+{
+  "$comment": "开发期模板。生产部署请 cp 到 ~/.openclaw/openclaw.json 后再改路径。",
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 7800,
+    "log_level": "info"
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "coordinator",
+        "display_name": "汇报总控",
+        "workspace": "./openclaw/workspaces/coordinator",
+        "agentDir": "~/.openclaw/agents/coordinator"
+      },
+      {
+        "id": "material",
+        "display_name": "资料员",
+        "workspace": "./openclaw/workspaces/material",
+        "agentDir": "~/.openclaw/agents/material"
+      },
+      {
+        "id": "point-extractor",
+        "display_name": "分析师",
+        "workspace": "./openclaw/workspaces/point-extractor",
+        "agentDir": "~/.openclaw/agents/point-extractor"
+      },
+      {
+        "id": "structure",
+        "display_name": "结构设计师",
+        "workspace": "./openclaw/workspaces/structure",
+        "agentDir": "~/.openclaw/agents/structure"
+      },
+      {
+        "id": "upward-opt",
+        "display_name": "表达教练",
+        "workspace": "./openclaw/workspaces/upward-opt",
+        "agentDir": "~/.openclaw/agents/upward-opt"
+      },
+      {
+        "id": "copywriter",
+        "display_name": "文书",
+        "workspace": "./openclaw/workspaces/copywriter",
+        "agentDir": "~/.openclaw/agents/copywriter"
+      },
+      {
+        "id": "html-designer",
+        "display_name": "设计师",
+        "workspace": "./openclaw/workspaces/html-designer",
+        "agentDir": "~/.openclaw/agents/html-designer"
+      },
+      {
+        "id": "video-producer",
+        "display_name": "视频制作",
+        "workspace": "./openclaw/workspaces/video-producer",
+        "agentDir": "~/.openclaw/agents/video-producer"
+      },
+      {
+        "id": "reviewer",
+        "display_name": "质量检查员",
+        "workspace": "./openclaw/workspaces/reviewer",
+        "agentDir": "~/.openclaw/agents/reviewer"
+      }
+    ]
+  },
+  "channels": [
+    {
+      "name": "huihuibao-web",
+      "type": "ws-custom",
+      "listen": "127.0.0.1:7860"
+    }
+  ],
+  "bindings": [
+    {
+      "agentId": "coordinator",
+      "match": {
+        "channel": "huihuibao-web"
+      }
+    }
+  ],
+  "providers": {
+    "default": "minimax",
+    "anthropic": {
+      "model": "claude-sonnet-4-6",
+      "opus": "claude-opus-4-7"
+    },
+    "minimax": {
+      "model": "abab7-chat-preview"
+    }
+  },
+  "tts": {
+    "provider": "minimax",
+    "model": "speech-02-hd"
+  }
+}

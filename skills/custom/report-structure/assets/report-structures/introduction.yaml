@@ -1,0 +1,9 @@
+report_type: introduction
+chapters:
+  - { chapter_no: 1, title: "封面",       type: cover,      data_keys: [] }
+  - { chapter_no: 2, title: "工作背景",   type: background, data_keys: [background] }
+  - { chapter_no: 3, title: "工作目标",   type: goal,       data_keys: [goal] }
+  - { chapter_no: 4, title: "主要内容",   type: content,    data_keys: [completed, key_points, in_progress] }
+  - { chapter_no: 5, title: "当前成果",   type: results,    data_keys: [key_data, key_points] }
+  - { chapter_no: 6, title: "常见问题",   type: risks,      data_keys: [risks] }
+  - { chapter_no: 7, title: "后续安排",   type: next_steps, data_keys: [next_steps] }

@@ -1,0 +1,13 @@
+{
+  "name": "lobsterScan",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "stop": "bash scripts/stop.sh",
+    "bootstrap": "bash scripts/bootstrap-openclaw.sh && bash scripts/install-skills.sh --all",
+    "web": "pnpm --filter web-frontend dev",
+    "admin": "pnpm --filter admin-frontend dev"
+  }
+}

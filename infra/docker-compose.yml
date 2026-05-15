@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  gateway:
+    image: node:20-alpine
+    working_dir: /work
+    command: sh -c "npm i -g openclaw@latest && openclaw gateway"
+    volumes:
+      - ./../openclaw:/work/openclaw
+      - openclaw-home:/root/.openclaw
+    ports:
+      - "7800:7800"
+      - "7860:7860"
+    env_file: ../.env
+
+  web-backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web-backend
+    env_file: ../.env
+    volumes:
+      - ../data:/app/data
+      - openclaw-home:/root/.openclaw
+    ports:
+      - "8000:8000"
+    depends_on: [gateway]
+
+  admin-backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.admin-backend
+    env_file: ../.env
+    volumes:
+      - ..:/app
+      - openclaw-home:/root/.openclaw
+    ports:
+      - "8100:8100"
+
+  web-frontend:
+    image: node:20-alpine
+    working_dir: /app/apps/web-frontend
+    command: sh -c "corepack enable && pnpm install && pnpm dev"
+    volumes:
+      - ..:/app
+    ports:
+      - "3000:3000"
+    env_file: ../.env
+
+  admin-frontend:
+    image: node:20-alpine
+    working_dir: /app/apps/admin-frontend
+    command: sh -c "corepack enable && pnpm install && pnpm dev"
+    volumes:
+      - ..:/app
+    ports:
+      - "3100:3100"
+    env_file: ../.env
+
+volumes:
+  openclaw-home:
