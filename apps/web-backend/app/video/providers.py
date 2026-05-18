@@ -47,10 +47,10 @@ REGISTRY: dict[str, VideoProvider] = {
         tts_skill="minimax-tts",
         video_skill="minimax-video",
         tts_provider_label="minimax",
-        tts_model="speech-02-hd",
+        tts_model="speech-2.8-hd",       # mmx CLI 真 API 默认(plan 面板写 speech-hd / speech-02-hd 是计量别名)
         video_provider_label="minimax-hailuo",
-        # 默认走 TokenPlan 周配额列表里能跑的型号(Hailuo-02 不在 plan 覆盖 → quota_exhausted)
-        video_model="MiniMax-Hailuo-2.3-Fast-6s-768p",
+        # 默认走 mmx 接受的真 API model id(plan 面板的 -6s-768p 是计费 metric)
+        video_model="MiniMax-Hailuo-2.3",
         required_env=["MINIMAX_API_KEY"],
         notes="V0 默认。video 模型见 TokenPlan 配额面板,不在 plan 的会 quota_exhausted",
         # 这些选项在管台 Config 出下拉,按 plan 覆盖 + 常用 PAYG 排序
@@ -61,6 +61,7 @@ REGISTRY: dict[str, VideoProvider] = {
             "T2V-01-Director",
         ],
         available_tts_models=[
+            "speech-2.8-hd", "speech-2.6",
             "speech-02-hd", "speech-02-turbo",
             "speech-01-hd", "speech-01-turbo",
         ],
@@ -114,15 +115,26 @@ DEFAULT_PROVIDER_ID = "minimax"
 # ─────────────────────────────────────────────────────────────
 # TokenPlan 周配额覆盖的模型集合 — 不在此集合的型号属于 PAYG 渠道。
 # 业务后端用它决定给 skill 注入 _TOKENPLAN / _PAYG / 通用 fallback 哪一把 key。
-# 与管台 Config 页 video model 下拉列表保持一致(参见 admin config_api.py)。
+#
+# 注意命名空间:plan 配额面板用「计量名」(含 -6s-768p 后缀),mmx CLI 真 API ID 用基础名。
+# 路由集合**同时包含两者**,只要任一形式匹配就归到 TokenPlan,避免 user 在管台改成 API ID
+# 后 routing 判定漂移到 PAYG。
 MINIMAX_TOKENPLAN_VIDEO_MODELS: set[str] = {
+    # plan 计量名(metric 维度)
     "MiniMax-Hailuo-2.3-Fast-6s-768p",
     "MiniMax-Hailuo-2.3-6s-768p",
+    # mmx 真 API model id
+    "MiniMax-Hailuo-2.3",
+    "MiniMax-Hailuo-2.3-Fast",
 }
 
 MINIMAX_TOKENPLAN_TTS_MODELS: set[str] = {
+    # plan 计量名
     "speech-02-hd", "speech-02-turbo",
     "speech-01-hd", "speech-01-turbo",
+    "speech-hd",
+    # mmx 真 API model id
+    "speech-2.8-hd", "speech-2.6",
 }
 
 

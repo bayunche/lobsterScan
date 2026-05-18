@@ -308,20 +308,36 @@ def _strip_json_block(text: str) -> str:
 @router.post("/feat/report")
 async def feat_report(req: FeatReportRequest) -> dict:
     from ..orchestrator import pipeline
-    from .files import lookup_many
+    from .files import lookup_many_with_paths
+    from ..extract import extract_attachment_text
     session = _get_session(req.session_id)
 
-    # 解出上传的文件元数据
-    attachments = lookup_many(req.file_ids)
+    # 解出上传的文件 + 真磁盘 path(给抽取器用)
+    items = lookup_many_with_paths(req.file_ids)
+    attachments = [meta for meta, _ in items]   # 给前端 message 用,不带 path
 
     task_id = f"tsk_{uuid.uuid4().hex[:12]}"
-    # 把附件文件名/概要拼进 raw_text，让资料员真"读到"
+    # 把 raw_text + 每个附件**真实抽出的内容**喂给 material agent
+    # 之前只拼了文件名/大小,agent 完全看不到内容 → 报"素材整理失败"
     raw_text = req.raw_text or ""
-    if attachments:
-        raw_text += "\n\n# 附件\n" + "\n".join(
-            f"- {a['filename']}（{_human_size(a['size'])}, {a['mime']}）"
-            for a in attachments
-        )
+    if items:
+        sections: list[str] = []
+        unparsed: list[str] = []
+        for meta, p in items:
+            r = extract_attachment_text(p, meta["filename"], meta["mime"])
+            head = f"## 附件:{meta['filename']}({_human_size(meta['size'])}, {meta['mime']})"
+            if r.ok:
+                body = r.text + (f"\n\n_(注:{r.note})_" if r.truncated else "")
+                sections.append(f"{head}\n\n{body}")
+            else:
+                unparsed.append(f"- {meta['filename']}:{r.note}")
+                sections.append(f"{head}\n\n_未抽取_({r.note})")
+        raw_text = (raw_text + "\n\n" if raw_text else "") + "\n\n---\n\n".join(sections)
+        if unparsed:
+            raw_text += (
+                "\n\n# 解析失败的附件(请在 data_gaps 注明,提示用户改文本框输入)\n"
+                + "\n".join(unparsed)
+            )
 
     run = pipeline.create_task(
         task_id=task_id,

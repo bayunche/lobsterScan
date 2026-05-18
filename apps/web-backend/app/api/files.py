@@ -111,3 +111,13 @@ def lookup_many(file_ids: list[str]) -> list[dict]:
         if p:
             out.append(_meta_from_path(p))
     return out
+
+
+def lookup_many_with_paths(file_ids: list[str]) -> list[tuple[dict, Path]]:
+    """同 lookup_many,但带磁盘 Path — 给 extractor 抽文本用,不返回给前端"""
+    out: list[tuple[dict, Path]] = []
+    for fid in file_ids or []:
+        p = _find_path(fid)
+        if p:
+            out.append((_meta_from_path(p), p))
+    return out

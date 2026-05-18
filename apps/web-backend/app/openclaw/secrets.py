@@ -94,7 +94,12 @@ def _resolve_minimax_key(all_secrets: dict[str, str]) -> tuple[str | None, str]:
     """根据当前 openclaw.json 的 video.model / tts.model,挑出该用哪把 MiniMax key。
 
     返回 (key_value, channel_label)。channel_label 用于日志,便于排查 quota 问题。
-    优先级:对应渠道的专用 key → 通用 MINIMAX_API_KEY(fallback,兼容老配置)。
+
+    fallback 链(从严到宽):
+      1. 当前 channel 的专用 key(_TOKENPLAN / _PAYG)
+      2. 另一渠道的 key(交叉 fallback — 用户常常只填一把账户 key,不区分渠道)
+      3. 通用 MINIMAX_API_KEY(老配置)
+      4. None(没填任何 key)
     """
     from pathlib import Path
     import json as _json
@@ -112,11 +117,15 @@ def _resolve_minimax_key(all_secrets: dict[str, str]) -> tuple[str | None, str]:
         log.warning("read openclaw.json for minimax channel failed: %s", e)
 
     channel = classify_minimax_channel(video_model, tts_model)
-    # 渠道专用 key 优先,fallback 到通用 key
     primary = "MINIMAX_API_KEY_TOKENPLAN" if channel == "tokenplan" else "MINIMAX_API_KEY_PAYG"
-    val = all_secrets.get(primary) or all_secrets.get("MINIMAX_API_KEY")
-    used = primary if all_secrets.get(primary) else ("MINIMAX_API_KEY" if val else "(none)")
-    return val, f"{channel}:{used}"
+    cross  = "MINIMAX_API_KEY_PAYG" if channel == "tokenplan" else "MINIMAX_API_KEY_TOKENPLAN"
+
+    for slot, label in [(primary, primary), (cross, cross + " (cross-fallback)"),
+                        ("MINIMAX_API_KEY", "MINIMAX_API_KEY (legacy)")]:
+        v = all_secrets.get(slot)
+        if v:
+            return v, f"{channel}:{label}"
+    return None, f"{channel}:(none)"
 
 
 async def env_for_agent(agent_id: str) -> dict[str, str]:

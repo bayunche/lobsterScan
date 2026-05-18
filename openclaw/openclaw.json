@@ -93,7 +93,7 @@
   },
   "tts": {
     "provider": "minimax",
-    "model": "speech-02-hd"
+    "model": "speech-2.8-hd"
   },
   "video": {
     "provider": "minimax",

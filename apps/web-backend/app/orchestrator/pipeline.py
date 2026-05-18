@@ -475,6 +475,12 @@ def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
 # 原始内容
 {run.raw_text}
 
+# 关于附件
+原始内容里如果出现 `## 附件:<filename>` 标题,那是**后端已经抽取好的附件纯文本**
+(.docx / .xlsx / .pdf 等都已用 python-docx / openpyxl / pdfminer 抽过),
+**不要**在 data_gaps 里写 "附件解析失败" — 内容已经在标题下方,直接用即可。
+只有出现 `_未抽取_(...)` 字样时才表示真的抽取失败。
+
 # MaterialPool schema
 {{
   "msg_type": "task.step.result",

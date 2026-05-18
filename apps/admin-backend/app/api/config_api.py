@@ -68,8 +68,10 @@ MODEL_PRESETS: dict[str, list[str]] = {
 }
 
 TTS_MODEL_PRESETS: dict[str, list[str]] = {
-    "minimax":        ["speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo",
-                       "speech-2.8-hd", "speech-2.6"],   # mmx 默认 speech-2.8-hd
+    # mmx CLI 真实 API 默认:speech-2.8-hd(放第一位)。speech-02-hd 是 plan 面板计量名,
+    # mmx 调 API 时会被转换;为了路由 + 配额匹配,推荐用 mmx 接受的真名
+    "minimax":        ["speech-2.8-hd", "speech-2.6", "speech-02-hd", "speech-02-turbo",
+                       "speech-01-hd", "speech-01-turbo"],
     "heygen-builtin": ["heygen-default"],
     "elevenlabs":     ["eleven_v3", "eleven_multilingual_v2", "eleven_turbo_v2_5"],
     "qwen3":          ["qwen3-tts-flash"],
@@ -174,7 +176,7 @@ async def read():
     j = _read()
     return {
         "providers": j.get("providers", {}),
-        "tts": j.get("tts", {"provider": "minimax", "model": "speech-02-hd"}),
+        "tts": j.get("tts", {"provider": "minimax", "model": "speech-2.8-hd"}),
         "video": j.get("video", {"provider": "minimax", "model": "MiniMax-Hailuo-2.3"}),
         "image": j.get("image", {"provider": "openai-gpt-image-2", "model": "gpt-image-2"}),
         "music": j.get("music", {"provider": "minimax-music", "model": "music-2.6"}),
