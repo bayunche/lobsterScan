@@ -57,8 +57,9 @@ async def list_exports(task_id: str) -> dict:
     return {"items": items}
 
 
-@router.get("/tasks/{task_id}/exports/{subpath:path}")
+@router.api_route("/tasks/{task_id}/exports/{subpath:path}", methods=["GET", "HEAD"])
 async def export(task_id: str, subpath: str):
+    """GET 拿文件;HEAD 仅探测存在性(前端 ArtifactChip probe 用,不能 405)"""
     fp = _safe_path(task_id, subpath)
     if not fp.exists() or not fp.is_file():
         raise HTTPException(status_code=404, detail={"error": {"biz_message": "产物尚未生成"}})

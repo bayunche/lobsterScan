@@ -11,5 +11,16 @@ const nextConfig = {
       },
     ];
   },
+  webpack: (config, { dev }) => {
+    // WSL2 + /mnt/c/ 挂载目录 chokidar 经常收不到 fs notify,改用 polling 触发热重载
+    if (dev) {
+      config.watchOptions = {
+        poll: 800,
+        aggregateTimeout: 200,
+        ignored: ["**/node_modules", "**/.next"],
+      };
+    }
+    return config;
+  },
 };
 module.exports = nextConfig;

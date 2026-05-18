@@ -32,22 +32,22 @@ class TurnResult:
 
 
 def _parse_top_object(stdout: str) -> dict[str, Any]:
-    """OpenClaw 在 JSON 前可能输出 config warning，找到顶层 { ... } 抠出来."""
-    depth = 0
-    start = -1
-    for i, ch in enumerate(stdout):
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start >= 0:
-                try:
-                    return json.loads(stdout[start:i + 1])
-                except json.JSONDecodeError:
-                    start = -1
-                    continue
+    """OpenClaw 在 JSON 前可能输出 config warning,找到顶层 { ... } 抠出来.
+
+    用 json.JSONDecoder().raw_decode — 它会跳过空白,从指定位置读一个完整 JSON value
+    并返回 (value, end_index)。对字符串内的 `{` `}` 正确处理(老版本数大括号会被字符串
+    里的反引号 / json fence ```json{...}``` 撞挂,见 memory [openclaw-client-parser-bug])。
+    """
+    decoder = json.JSONDecoder()
+    i = stdout.find("{")
+    while i != -1:
+        try:
+            obj, _end = decoder.raw_decode(stdout, i)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+        i = stdout.find("{", i + 1)
     raise RuntimeError(f"no JSON object in stdout · head={stdout[:200]!r}")
 
 
@@ -86,8 +86,11 @@ async def run_agent_turn(
     """
     import os as _os
     profile = f"lobster-{agent_id}"
+    # OPENCLAW_BIN 由 scripts/dev.sh 注入(优先项目自托管的 ./node_modules/.bin/openclaw);
+    # 兜底再用 PATH 里的 "openclaw",方便单独跑 uvicorn 也能工作。
+    oc_bin = _os.environ.get("OPENCLAW_BIN") or "openclaw"
     cmd = [
-        "openclaw", "--profile", profile,
+        oc_bin, "--profile", profile,
         "agent", "--agent", "main", "--local", "--json",
         "-m", message,
     ]
@@ -120,6 +123,13 @@ async def run_agent_turn(
     data = _parse_top_object(text)
 
     visible = _walk_find(data, "finalAssistantVisibleText") or _walk_find(data, "finalAssistantRawText") or ""
+    # OpenClaw 某些 plugin(如 lossless-claw)会把 agent 输出包成 payloads 数组,
+    # 此时没有 finalAssistantVisibleText,visible 文本在 payloads[i].text 里。
+    if not visible:
+        payloads = _walk_find(data, "payloads")
+        if isinstance(payloads, list) and payloads:
+            parts = [p.get("text") for p in payloads if isinstance(p, dict) and p.get("text")]
+            visible = "\n".join(parts) if parts else ""
     trace = _walk_find(data, "executionTrace") or {}
     usage = _walk_find(data, "usage") or {}
 

@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ChatSidePanel from "@/components/ChatSidePanel";
+
+const WEB_API_BASE = process.env.NEXT_PUBLIC_WEB_API_BASE || "http://localhost:8000";
 
 type Attachment = {
   file_id: string;
@@ -22,16 +24,26 @@ type ReportMeta = {
   preview?: string;
 };
 
+type Artifact = {
+  label: string;
+  url: string;             // /api/tasks/{id}/exports/...
+  kind: string;            // json / txt / md / mp4 / mp3 / srt / html / ...
+  open_in_new?: boolean;   // 投屏 HTML 这种新 tab 打开
+  probe?: boolean;         // 真存在性需要 list_exports 验证(video/mp4)
+};
+
 type ChatMsg = {
   id: string;
   agent: string;
   display_name: string;
   seal: string;
   ts: number;
-  kind: "user" | "intro" | "result" | "system";
+  kind: "user" | "intro" | "result" | "system" | "error";
   text: string;
   tokens?: number;
   attachments?: Attachment[];
+  artifacts?: Artifact[];   // agent 产出的文件
+  analysis?: string;        // agent 的思考过程(LLM 文本去掉 JSON 块后的解释)
   task_id?: string;
   report_meta?: ReportMeta;
 };
@@ -73,10 +85,13 @@ function initialMessages(): ChatMsg[] {
 
 export default function HomePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const taskId = searchParams.get("task");  // 来自 /tasks 列表点击 → /?task=tsk_xxx
   const [sid, setSid] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [taskTitle, setTaskTitle] = useState<string>("");   // task 模式下顶部显示
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -89,8 +104,28 @@ export default function HomePage() {
     setSid(s);
   }, []);
 
+  // 两种会话源:有 ?task 走 task chat,否则走 cluster session
   useEffect(() => {
+    if (taskId) {
+      // task 会话模式:fetch 该 task 的 chat,SSE 直连 web-backend(避免 Next rewrites SSE 缓冲)
+      fetch(`/api/tasks/${taskId}`).then(r => r.ok ? r.json() : null)
+        .then(d => setTaskTitle(d?.title || taskId));
+      fetch(`/api/tasks/${taskId}/chat`).then(r => r.ok ? r.json() : { messages: [] })
+        .then(d => setMessages(d.messages || []));
+      const es = new EventSource(`${WEB_API_BASE}/api/tasks/${taskId}/events`);
+      es.addEventListener("chat.message", (e) => {
+        const m = JSON.parse((e as MessageEvent).data);
+        setMessages(cur => cur.find(x => x.id === m.id) ? cur : [...cur, m]);
+      });
+      es.addEventListener("chat.message.update", (e) => {
+        const m = JSON.parse((e as MessageEvent).data);
+        setMessages(cur => cur.map(x => x.id === m.id ? m : x));
+      });
+      return () => es.close();
+    }
+    // 集群会话模式(默认)
     if (!sid) return;
+    setTaskTitle("");
     fetch(`/api/cluster/chat/${sid}/messages`).then(r => r.json()).then(d => {
       const fromServer: ChatMsg[] = d.messages || [];
       setMessages(fromServer.length > 0 ? fromServer : initialMessages());
@@ -106,7 +141,7 @@ export default function HomePage() {
       setMessages(cur => cur.map(x => x.id === m.id ? m : x));
     });
     return () => es.close();
-  }, [sid, router]);
+  }, [sid, taskId, router]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -121,15 +156,26 @@ export default function HomePage() {
 
   async function send(text?: string) {
     const t = (text ?? draft).trim();
-    if (!t || sending || !sid) return;
+    if (!t || sending) return;
+    if (!taskId && !sid) return;
     setSending(true);
     setDraft("");
     try {
-      await fetch("/api/cluster/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t, session_id: sid }),
-      });
+      if (taskId) {
+        // task 模式:发到 task chat(后端会触发 refine 流程)
+        await fetch(`/api/tasks/${taskId}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: t }),
+        });
+      } else {
+        // 集群模式
+        await fetch("/api/cluster/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: t, session_id: sid }),
+        });
+      }
     } finally {
       setSending(false);
     }
@@ -138,6 +184,17 @@ export default function HomePage() {
   return (
     <div className="page-bg">
       <div className="hall">
+        {taskId && (
+          <div className="task-banner serial">
+            <span className="regmark" />
+            <span>正在查看任务对话 · </span>
+            <span className="font-mono">{taskId}</span>
+            {taskTitle && <> · <span>{taskTitle}</span></>}
+            <span className="grow" />
+            <Link href="/" className="back-link">⟵ 返回集群对话</Link>
+            <Link href={`/tasks/${taskId}`} className="back-link ml-3">看任务详情 →</Link>
+          </div>
+        )}
         <header className="hall-head">
           <div className="head-top">
             <div className="brand-row">
@@ -223,6 +280,22 @@ export default function HomePage() {
       </div>
 
       <style jsx>{`
+        .task-banner {
+          display: flex; align-items: center; gap: 0.5rem;
+          padding: 0.55rem 1.25rem;
+          border-bottom: 1px solid var(--line);
+          background: var(--paper-warm);
+          color: var(--ink-soft);
+          font-size: 0.78rem;
+        }
+        .task-banner .grow { flex: 1; }
+        .back-link {
+          color: var(--ink);
+          text-decoration: none;
+          font-size: 0.78rem;
+        }
+        .back-link:hover { color: var(--seal); }
+
         .page-bg {
           min-height: 100vh;
           display: flex;
@@ -633,6 +706,19 @@ function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
         <div className={"bb-body" + (msg.kind === "intro" ? " bb-intro" : "") + (msg.text === "…" ? " bb-typing" : "")}>
           {msg.text === "…" ? <TypingDots /> : msg.text}
         </div>
+        {/* agent 思考过程 — 折叠默认收起,不抢戏 */}
+        {msg.analysis && (
+          <details className="bb-analysis">
+            <summary><span className="serial">🔍 思考过程</span></summary>
+            <div className="bb-analysis-body">{msg.analysis}</div>
+          </details>
+        )}
+        {/* agent 产出的文件 — chip 行,浏览器能开就开,不能就 download */}
+        {msg.artifacts && msg.artifacts.length > 0 && (
+          <div className="bb-artifacts">
+            {msg.artifacts.map((a) => <ArtifactChip key={a.url} a={a} />)}
+          </div>
+        )}
       </div>
       <style jsx>{`
         .bb-agent {
@@ -684,8 +770,104 @@ function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
           color: var(--ink-soft);
         }
         .bb-typing { padding: 0.9rem 1rem; }
+
+        /* 思考过程折叠 */
+        :global(.bb-analysis) {
+          margin-top: 0.4rem;
+          padding: 0.4rem 0.7rem;
+          background: transparent;
+          border-left: 2px solid var(--line);
+          font-size: 0.82rem;
+          color: var(--ink-soft);
+        }
+        :global(.bb-analysis summary) {
+          cursor: pointer; user-select: none;
+          color: var(--ink-mute);
+          list-style: none;
+        }
+        :global(.bb-analysis summary::before) {
+          content: "▸"; display: inline-block; margin-right: 0.4em;
+          transition: transform 120ms ease;
+        }
+        :global(.bb-analysis[open] summary::before) { transform: rotate(90deg); }
+        :global(.bb-analysis-body) {
+          margin-top: 0.5rem;
+          line-height: 1.55;
+          white-space: pre-wrap;
+          color: var(--ink-soft);
+        }
+
+        /* 产物 chip 行 */
+        :global(.bb-artifacts) {
+          margin-top: 0.5rem;
+          display: flex; flex-wrap: wrap; gap: 0.35rem;
+        }
       `}</style>
     </article>
+  );
+}
+
+// 单个 artifact chip — 根据 kind 决定 icon + 默认行为(open / download / probe-then-act)
+function ArtifactChip({ a }: { a: Artifact }) {
+  const [missing, setMissing] = useState(false);
+  // probe 模式(video/intro.mp4 这种可能没真生成):用 HEAD 探测
+  useEffect(() => {
+    if (!a.probe) return;
+    fetch(a.url, { method: "HEAD" }).then(r => { if (!r.ok) setMissing(true); }).catch(() => setMissing(true));
+  }, [a.url, a.probe]);
+  if (missing) return null;
+
+  // 浏览器能直接 inline 显示的 kind → open in tab;否则 download
+  const inlineKinds = new Set(["json", "txt", "md", "html", "mp4", "mp3", "srt", "jpg", "jpeg", "png", "webp", "gif", "pdf"]);
+  const canOpen = inlineKinds.has(a.kind);
+  const icon = (
+    a.kind === "html" ? "▶"
+    : a.kind === "mp4" ? "▶"
+    : a.kind === "mp3" ? "♪"
+    : a.kind === "srt" ? "字"
+    : a.kind === "json" ? "{}"
+    : a.kind === "md" ? "✎"
+    : a.kind === "txt" ? "T"
+    : a.kind === "jpg" || a.kind === "jpeg" || a.kind === "png" || a.kind === "webp" || a.kind === "gif" ? "🖼"
+    : a.kind === "pdf" ? "PDF"
+    : "⬇"
+  );
+  return (
+    <a
+      href={a.url}
+      target={canOpen || a.open_in_new ? "_blank" : undefined}
+      rel="noopener noreferrer"
+      download={canOpen || a.open_in_new ? undefined : ""}
+      className={"chip " + (a.open_in_new ? "chip-feature" : "")}
+    >
+      <span className="chip-icon">{icon}</span>
+      <span className="chip-label">{a.label}</span>
+      <style jsx>{`
+        .chip {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.22rem 0.55rem;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          background: var(--paper);
+          color: var(--ink);
+          text-decoration: none;
+          font-size: 0.75rem;
+          transition: all var(--t-fast) var(--ease);
+        }
+        .chip:hover { border-color: var(--ink); transform: translateY(-1px); }
+        .chip-feature {
+          border-color: var(--seal); background: rgba(198,84,60,0.05); color: var(--seal);
+          font-weight: 500;
+        }
+        .chip-feature:hover { background: rgba(198,84,60,0.1); border-color: var(--seal); }
+        .chip-icon {
+          font-family: var(--font-mono);
+          font-size: 0.7rem;
+          color: var(--ink-mute);
+        }
+        .chip-feature .chip-icon { color: var(--seal); }
+      `}</style>
+    </a>
   );
 }
 

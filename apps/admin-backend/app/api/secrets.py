@@ -16,8 +16,14 @@ router = APIRouter(prefix="/secrets", tags=["secrets"])
 KNOWN_KEYS = [
     # LLM
     "ANTHROPIC_API_KEY",
+    # MiniMax — 通用 key(LLM/TTS/Video 都能用,作 fallback)
     "MINIMAX_API_KEY",
-    "MINIMAX_GROUP_ID",          # MiniMax SDK 必须；和 API_KEY 配对使用
+    # MiniMax — 双通道:TokenPlan 走周配额账户(plan 覆盖的 model),PAYG 走预付费余额账户
+    # 业务后端根据当前 video.model 是否在 TokenPlan 列表自动选 inject 哪个到 MINIMAX_API_KEY
+    "MINIMAX_API_KEY_TOKENPLAN",
+    "MINIMAX_API_KEY_PAYG",
+    "MINIMAX_GROUP_ID",          # MiniMax SDK 可选;skill 实测不需要,但留着兼容
+    # OpenAI — 只存 secret;base_url / model 在管台 Config 页明文配置(写到 openclaw.json image 节点)
     "OPENAI_API_KEY",
     "QWEN_API_KEY",
     "GLM_API_KEY",

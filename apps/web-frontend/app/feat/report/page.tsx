@@ -218,7 +218,7 @@ export default function FeatReportPage() {
 
         {/* ③ 配置 */}
         <section className="cfg">
-          <div className="cfg-head serial">§ 汇报设置</div>
+          <div className="cfg-head serial"><span className="regmark" /> 汇报设置</div>
 
           <Row label="标题">
             <input

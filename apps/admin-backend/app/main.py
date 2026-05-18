@@ -21,7 +21,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="OpenClaw 统一管台 · admin-backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3100"],
+    # 同时放行 localhost 和 127.0.0.1(浏览器把它们当不同 origin,CORS 严格匹配)
+    allow_origins=["http://localhost:3100", "http://127.0.0.1:3100"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

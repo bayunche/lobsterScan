@@ -46,8 +46,8 @@ export default function ChatSidePanel() {
 
       <section className="block">
         <header className="block-head">
-          <span className="serial">§ 活跃任务</span>
-          <span className="serial">{tasks.length}</span>
+          <span className="serial"><span className="regmark" /> 活跃任务</span>
+          <Link href="/tasks" className="view-all serial">查看全部 →</Link>
         </header>
         {tasks.length === 0 ? (
           <div className="empty">
@@ -61,7 +61,8 @@ export default function ChatSidePanel() {
               const total = t.steps.length || 8;
               return (
                 <li key={t.task_id}>
-                  <Link href={`/tasks/${t.task_id}`} className="task-row">
+                  {/* 点击 = 切换首页对话到该 task 的会话(不进详情页) */}
+                  <Link href={{ pathname: "/", query: { task: t.task_id } }} className="task-row">
                     <div className="task-row-top">
                       <span className={"task-dot dot " + (
                         t.status === "done" ? "dot-on" :
@@ -87,7 +88,7 @@ export default function ChatSidePanel() {
       </section>
 
       <section className="block tip">
-        <div className="serial tip-label">§ 用法提示</div>
+        <div className="serial tip-label"><span className="regmark" /> 用法提示</div>
         <ul className="tip-list">
           <li>顶部点 <span className="kbd">头像</span> 自动 @ 那位成员单聊</li>
           <li>消息里写 <span className="kbd">@分析师 @质量检查员</span> 可同时 @ 多位</li>
@@ -186,9 +187,16 @@ export default function ChatSidePanel() {
         /* === 区块 === */
         .block { display: flex; flex-direction: column; gap: 0.55rem; }
         .block-head {
-          display: flex; justify-content: space-between;
+          display: flex; justify-content: space-between; align-items: center;
           color: var(--ink-mute);
         }
+        :global(.view-all) {
+          color: var(--ink-mute);
+          text-decoration: none;
+          border-bottom: 1px solid transparent;
+          transition: all var(--t-fast) var(--ease);
+        }
+        :global(.view-all:hover) { color: var(--ink); border-color: var(--ink); }
 
         .empty {
           padding: 1.25rem 0.65rem;

@@ -14,7 +14,8 @@ from .api import cluster, events, exports, files, tasks
 app = FastAPI(title="会汇报 · web-backend", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # 同时放行 localhost 和 127.0.0.1(浏览器把它们当不同 origin,CORS 严格匹配)
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

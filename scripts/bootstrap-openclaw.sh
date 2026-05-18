@@ -8,6 +8,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENTS=(coordinator material point-extractor structure upward-opt copywriter html-designer video-producer reviewer)
+OC="$REPO_ROOT/scripts/oc.sh"   # 项目自托管 openclaw,自动 fallback 到全局
 
 create_agents() {
   for id in "${AGENTS[@]}"; do
@@ -17,15 +18,15 @@ create_agents() {
     echo "✓ ensured agent dir for $id"
   done
 
-  if command -v openclaw >/dev/null; then
+  if "$OC" --version >/dev/null 2>&1; then
     for id in "${AGENTS[@]}"; do
-      openclaw agent create --id "$id" \
+      "$OC" agent create --id "$id" \
         --workspace "$REPO_ROOT/openclaw/workspaces/$id" \
         --agent-dir "$HOME/.openclaw/agents/$id" \
         2>/dev/null || true
     done
   else
-    echo "⚠️  openclaw CLI 未安装。请先： npm install -g openclaw@latest && openclaw onboard --install-daemon"
+    echo "⚠️  openclaw 未就绪。先在仓库根 pnpm install,或 npm i -g openclaw@2026.5.5"
   fi
 }
 

@@ -7,6 +7,14 @@ type Item = { key: string; is_set: boolean; masked: string; updated_at: string |
 
 const BASE = process.env.NEXT_PUBLIC_ADMIN_API_BASE || "http://localhost:8100";
 
+// 给已知 key 标注用途 / 渠道。MiniMax 走 TokenPlan + PAYG 双通道。
+const KEY_META: Record<string, { channel?: string; help?: string }> = {
+  MINIMAX_API_KEY: { help: "通用 key — 作为渠道 key 缺失时的 fallback" },
+  MINIMAX_API_KEY_TOKENPLAN: { channel: "TokenPlan", help: "走周配额账户;model 在 plan 列表时优先用这把" },
+  MINIMAX_API_KEY_PAYG: { channel: "PAYG", help: "走预付费余额账户;model 不在 plan 列表时用这把" },
+  MINIMAX_GROUP_ID: { help: "可选;skill 实测不需要" },
+};
+
 export default function SecretsPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -62,11 +70,28 @@ export default function SecretsPage() {
           <div key={it.key} className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-mono text-sm font-medium">{it.key}</div>
+                <div className="flex items-center gap-2">
+                  <div className="font-mono text-sm font-medium">{it.key}</div>
+                  {KEY_META[it.key]?.channel && (
+                    <span
+                      className={
+                        "rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide " +
+                        (KEY_META[it.key].channel === "TokenPlan"
+                          ? "bg-violet-50 text-violet-700"
+                          : "bg-emerald-50 text-emerald-700")
+                      }
+                    >
+                      {KEY_META[it.key].channel} 渠道
+                    </span>
+                  )}
+                </div>
                 <div className="mt-1 text-xs text-neutral-500">
                   {it.is_set ? `已设置 · ${it.masked}` : "未设置"}
                   {it.updated_at && <span className="ml-2 text-neutral-400">· {it.updated_at}</span>}
                 </div>
+                {KEY_META[it.key]?.help && (
+                  <div className="mt-1 text-[11px] text-neutral-400">{KEY_META[it.key].help}</div>
+                )}
               </div>
               <div className="flex gap-2">
                 <button

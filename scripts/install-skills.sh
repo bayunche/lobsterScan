@@ -15,7 +15,7 @@ MAP[structure]="report-structure"
 MAP[upward-opt]="upward-translator humanizer"
 MAP[copywriter]="copywriter"
 MAP[html-designer]="web-design-engineer web-video-presentation gpt-image-2"
-MAP[video-producer]="heygen-avatar heygen-video elevenlabs playwright-recording ffmpeg moviepy"
+MAP[video-producer]="web-video-presentation heygen-avatar heygen-video elevenlabs playwright-recording ffmpeg moviepy minimax-tts minimax-video minimax-music"
 MAP[reviewer]="report-reviewer humanizer"
 
 find_skill_src() {

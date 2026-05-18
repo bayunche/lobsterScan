@@ -5,6 +5,7 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENTS=(coordinator material point-extractor structure upward-opt copywriter html-designer video-producer reviewer)
+OC="$REPO_ROOT/scripts/oc.sh"   # 项目自托管 openclaw,fallback 全局 PATH
 
 # 默认模型从 openclaw.json providers.default 推断；这里先用空让 OpenClaw 用全局默认
 MODEL_OPT=""
@@ -13,7 +14,7 @@ if [[ -n "${LOBSTER_DEFAULT_MODEL:-}" ]]; then
 fi
 
 # 已注册的 agent 列表
-EXISTING=$(openclaw agents list 2>/dev/null | grep -E "^- " | awk '{print $2}' | tr -d '()')
+EXISTING=$("$OC" agents list 2>/dev/null | grep -E "^- " | awk '{print $2}' | tr -d '()')
 
 register_one() {
   local id="$1"
@@ -24,7 +25,7 @@ register_one() {
   local ws="$REPO_ROOT/openclaw/workspaces/$id"
   local ad="$HOME/.openclaw/agents/lobster-$id"
   mkdir -p "$ws/.agents/skills" "$ad"
-  openclaw agents add "$id" \
+  "$OC" agents add "$id" \
     --workspace "$ws" \
     --agent-dir "$ad" \
     $MODEL_OPT \
@@ -46,4 +47,4 @@ done
 
 echo
 echo "▸ 当前 OpenClaw agents："
-openclaw agents list 2>/dev/null | grep -E "^- " | head -25
+"$OC" agents list 2>/dev/null | grep -E "^- " | head -25

@@ -23,7 +23,7 @@ export default function SideRail() {
       </Link>
 
       <nav>
-        <div className="serial rail-section">§ 主入口</div>
+        <div className="serial rail-section"><span className="regmark" /> 主入口</div>
         <ul className="rail-list">
           <li>
             <Link href="/" className={"rail-item " + (path === "/" ? "on" : "")}>
@@ -34,9 +34,18 @@ export default function SideRail() {
               </div>
             </Link>
           </li>
+          <li>
+            <Link href="/tasks" className={"rail-item " + (path?.startsWith("/tasks") ? "on" : "")}>
+              <span className="rail-code">TSK</span>
+              <div className="rail-text">
+                <span className="rail-label">任务列表</span>
+                <span className="serial rail-hint">历史会话 / 切换</span>
+              </div>
+            </Link>
+          </li>
         </ul>
 
-        <div className="serial rail-section mt-5">§ 集群功能</div>
+        <div className="serial rail-section mt-5"><span className="regmark" /> 集群功能</div>
         <ul className="rail-list">
           {FEATURES.map((f) => {
             const active = path?.startsWith(f.href);

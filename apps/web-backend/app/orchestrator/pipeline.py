@@ -21,6 +21,13 @@ from ..config import settings
 from ..openclaw.client import TurnResult, extract_json, run_agent_turn
 from ..openclaw.secrets import env_for_agent
 from ..openclaw.tokens import report_usage
+from ..render.html_builder import build_presentation
+from ..video.providers import (
+    VideoProvider,
+    build_prompt_for_provider,
+    resolve_from_openclaw_json,
+    stub_response_payload,
+)
 
 log = logging.getLogger("orchestrator")
 
@@ -112,9 +119,18 @@ def _summarize_output(step: str, output_json: dict | None, output_text: str) -> 
 # ---- JSON 输出硬约束（所有 agent prompt 末尾追加这段） ----
 JSON_RULE = """
 
-# 输出格式（强制）
-你必须只输出一段 ```json ... ``` 代码块，不要任何 markdown 表格、说明文字、校验报告、emoji。
-该 JSON 必须能被 json.loads() 直接解析。如果信息不足以填某字段，填 [] 或 null，不要省略字段。
+# 输出格式（强制 · 必须两段）
+你必须按这个顺序输出**两段内容**:
+
+## 第 1 段:思考过程(自然语言,80-300 字)
+告诉用户你是怎么读这道题的、抓住了哪些关键点、怎么决策的、为什么选这种结构。
+**不要列条目堆砌**,要像跟同事说话一样讲清楚思路。**不要写 emoji,不要 markdown 表格**。
+
+## 第 2 段:结构化结果(JSON 代码块)
+紧接着上面,输出**一段** ```json ... ``` 代码块,内部 JSON 必须能被 json.loads() 直接解析。
+如果信息不足以填某字段,填 [] 或 null,不要省略字段。**不要在 JSON 里写说明 / 校验报告 / emoji。**
+
+只允许这两段,顺序固定:先「思考过程」自然语言,再「JSON 代码块」。
 """
 
 
@@ -202,6 +218,13 @@ class TaskRun:
                     "url": f"/api/tasks/{self.task_id}/exports/{f.name}",
                     "size": f.stat().st_size,
                 }
+        # 由 html_builder 产出的自包含投屏页,提一个常驻 alias 进 artifacts 列表
+        index_html = d / "web-presentation" / "index.html"
+        if index_html.exists():
+            out["web_presentation.html"] = {
+                "url": f"/api/tasks/{self.task_id}/exports/web-presentation/index.html",
+                "size": index_html.stat().st_size,
+            }
         return out
 
 
@@ -210,38 +233,117 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
+# ---- video provider (按需读管台 openclaw.json,决定走哪条数字人源) ----
+def _current_video_provider() -> VideoProvider:
+    return resolve_from_openclaw_json(settings.project_root / "openclaw" / "openclaw.json")
+
+
 # ---- 全局 task store ----
 _runs: dict[str, TaskRun] = {}
 
 
 def get_run(task_id: str) -> TaskRun | None:
-    return _runs.get(task_id)
+    """先看内存,内存没有就 lazy-load 从 disk 恢复(uvicorn --reload 后能找回 done 的 task)"""
+    run = _runs.get(task_id)
+    if run is not None:
+        return run
+    return _load_run_from_disk(task_id)
 
 
 def list_runs(limit: int = 20) -> list[TaskRun]:
-    return sorted(_runs.values(), key=lambda r: r.created_at, reverse=True)[:limit]
+    """合并内存里的活动 task + 磁盘上的历史 task,按 created_at 降序"""
+    seen: dict[str, TaskRun] = dict(_runs)
+    # 扫描 data/outputs/ 把没在内存里的历史 task lazy-load 进来
+    try:
+        for d in OUTPUTS_ROOT.iterdir():
+            if not d.is_dir():
+                continue
+            tid = d.name
+            if tid in seen:
+                continue
+            r = _load_run_from_disk(tid)
+            if r:
+                seen[tid] = r
+    except (FileNotFoundError, OSError):
+        pass
+    return sorted(seen.values(), key=lambda r: r.created_at, reverse=True)[:limit]
+
+
+def _load_run_from_disk(task_id: str) -> TaskRun | None:
+    """从 data/outputs/<task_id>/task.json + chat.jsonl 恢复一个 TaskRun(只用于查询,
+    不参与新事件 dispatch — subscribers 是空的,但 history replay 能拿到 chat)。"""
+    from datetime import datetime as _dt
+    task_dir = OUTPUTS_ROOT / task_id
+    task_json = task_dir / "task.json"
+    if not task_json.exists():
+        return None
+    try:
+        j = json.loads(task_json.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("parse task.json for %s failed: %s", task_id, e)
+        return None
+
+    # task.json 没保留 raw_text,这里给空字符串(已 done 的 task 不会再 re-run material)
+    run = TaskRun(
+        task_id=j.get("task_id", task_id),
+        title=j.get("title", ""),
+        report_type=j.get("report_type", "project_progress"),
+        audience=j.get("audience", ""),
+        duration=j.get("duration", ""),
+        style=j.get("style", ""),
+        raw_text="",
+        status=j.get("status", "done"),
+    )
+    try:
+        run.created_at = _dt.fromisoformat(j["created_at"]).timestamp()
+    except Exception:  # noqa: BLE001
+        pass
+    # 复原 steps(状态 + 时间 + tokens,LLM 文本细节不恢复)
+    for sd in j.get("steps", []):
+        st = StepState(step=sd["step"], label=sd["label"], agent=sd["agent"],
+                       status=sd.get("status", "pending"))
+        for k in ("provider", "model", "error"):
+            setattr(st, k, sd.get(k))
+        if isinstance(sd.get("tokens"), int):
+            st.prompt_tokens = sd["tokens"]  # 粗略归到 prompt
+        run.steps.append(st)
+    # 加载 chat history(jsonl 每行一条 msg)
+    chat_jsonl = task_dir / "chat.jsonl"
+    if chat_jsonl.exists():
+        msgs: list[dict] = []
+        for line in chat_jsonl.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                msgs.append(json.loads(line))
+            except Exception:  # noqa: BLE001
+                pass
+        run._chat_log = msgs  # type: ignore[attr-defined]
+    # 缓存到 _runs,后续访问直接命中
+    _runs[task_id] = run
+    return run
 
 
 # ---- 事件订阅 ----
 async def subscribe(task_id: str):
+    """SSE 长连接:任务期间 + 任务结束后都保持监听,允许后续 refine 推流."""
     run = _runs.get(task_id)
     if not run:
         return
     q: asyncio.Queue = asyncio.Queue()
+    # 先把已知状态预填到队列(reconnect 友好),再注册到广播池,确保历史与新事件不会错序
+    for s in run.steps:
+        q.put_nowait(("task.step", _step_event(s)))
+    for msg in getattr(run, "_chat_log", []):
+        q.put_nowait(("chat.message", msg))
+    q.put_nowait(("task.done", {"status": run.status}))
     run.subscribers.append(q)
     try:
-        # reconnect 友好：把当前已知 step 状态 + chat 历史喷一次
-        for s in run.steps:
-            await q.put(("task.step", _step_event(s)))
-        for msg in getattr(run, "_chat_log", []):
-            await q.put(("chat.message", msg))
-        if run.status != "running":
-            await q.put(("task.done", {"status": run.status}))
-            return
         while True:
             evt = await q.get()
             if evt is None:
-                return
+                # 留个兜底 sentinel,正常情况下 execute / handle_user_feedback 不会 put None
+                break
             yield evt
     finally:
         try:
@@ -264,6 +366,58 @@ async def _broadcast(run: TaskRun, event: str, data: dict) -> None:
         await q.put((event, data))
 
 
+def _extract_analysis(text: str | None) -> str:
+    """从 agent LLM 输出里抽出"思考过程" — 去掉所有 ```...``` 代码块(主要是 ```json),
+    剩下的解释性文本(agent 怎么读题 / 怎么决策的)就是给用户看的 reasoning。
+
+    限长 1200 字符,过长截断;过短(< 30 字)返回 "" 让前端不渲染。
+    """
+    if not text:
+        return ""
+    import re
+    cleaned = re.sub(r"```[a-zA-Z]*\n.*?\n\s*```", "", text, flags=re.S).strip()
+    # 多余空行收一下
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    if len(cleaned) < 30:
+        return ""
+    if len(cleaned) > 1200:
+        cleaned = cleaned[:1200].rstrip() + "…"
+    return cleaned
+
+
+def _step_artifacts(task_id: str, step: str, has_json: bool, has_text: bool = True) -> list[dict]:
+    """根据 step 名拼出该步产物在 /api/tasks/{id}/exports/ 下的访问 URL 列表。
+
+    返回结构供前端 Bubble 渲染:[{label, url, kind, open_in_new?}]
+    - kind 用于前端按 MIME 决定 open / download(json/md → 打开,mp3/mp4 → 浏览器播放,
+      未知 → download)
+    - open_in_new = True 时强制新 tab 打开(投屏 HTML 这种)
+    """
+    base = f"/api/tasks/{task_id}/exports"
+    items: list[dict] = []
+    if has_text:
+        items.append({"label": "文本", "url": f"{base}/{step}.txt", "kind": "txt"})
+    if has_json:
+        items.append({"label": "JSON", "url": f"{base}/{step}.json", "kind": "json"})
+    # step 特殊产物 hint:让 Bubble 列出 agent 真正产出的可视化文件
+    extras: dict[str, list[dict]] = {
+        "copywriting": [
+            {"label": "讲稿 (md)", "url": f"{base}/script.md", "kind": "md"},
+        ],
+        "html_design": [
+            {"label": "▶ 投屏 HTML", "url": f"{base}/web-presentation/index.html",
+             "kind": "html", "open_in_new": True},
+        ],
+        "video_production": [
+            # 这些路径只在 minimax skill 真跑通时存在;前端拿到 404 自己降级
+            {"label": "数字人开场 mp4", "url": f"{base}/video/intro.mp4", "kind": "mp4", "probe": True},
+            {"label": "SRT 字幕", "url": f"{base}/audio/subtitles.srt", "kind": "srt", "probe": True},
+        ],
+    }
+    items.extend(extras.get(step, []))
+    return items
+
+
 def _chat_msg(agent: str, text: str, kind: str = "result") -> dict:
     """构造一条 chat.message 事件 payload."""
     import uuid as _uuid
@@ -280,11 +434,20 @@ def _chat_msg(agent: str, text: str, kind: str = "result") -> dict:
 
 # 保存全任务的群聊历史（用于 reconnect / 历史回放）
 def _persist_chat(run: TaskRun, msg: dict) -> None:
+    """append 到内存 + jsonl 落盘 — uvicorn --reload 不丢消息"""
     run_chat = getattr(run, "_chat_log", None)
     if run_chat is None:
         run_chat = []
         run._chat_log = run_chat
     run_chat.append(msg)
+    # 同步落盘:每条 message 一行 JSON,追加写
+    try:
+        d = run.output_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        with (d / "chat.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001
+        log.warning("persist chat to disk failed: %s", e)
 
 
 def get_chat(task_id: str) -> list[dict]:
@@ -429,82 +592,18 @@ chapters 数量 5-7，必须包含 cover / summary / next_steps 三种类型。"
         script = copy_out.get("script_md") or ""
         slides = copy_out.get("slides") or []
         narrations = copy_out.get("narrations") or []
-        body = f"""请用挂载的 minimax-tts 和 minimax-video 两个 skill 制作汇报视频物料。
-
-# 当前任务
-task_id: {run.task_id}
-audio_dir: data/outputs/{run.task_id}/audio/
-video_dir: data/outputs/{run.task_id}/video/
-duration:  {run.duration}
-audience:  {run.audience}
-style:     {run.style}
-
-# 讲稿（script_md）
-{script[:1200]}
-
-# Slides（{len(slides)} 页）
-```json
-{json.dumps(slides, ensure_ascii=False)[:800]}
-```
-
-# Narrations（上游已给 {len(narrations)} 段）
-```json
-{json.dumps(narrations, ensure_ascii=False)[:600]}
-```
-
-# 你要做的 — 两条腿并行
-## (A) TTS 配音 · minimax-tts
-按 narrations / slides 切讲稿，逐段调 `.agents/skills/minimax-tts/scripts/synthesize.py` 生成 mp3。
-- 每段 mp3 → `data/outputs/{run.task_id}/audio/<两位序号>.mp3`
-- 元数据写 jsonl，调 build_srt.py 生成 subtitles.srt
-
-## (B) 数字人开场镜头 · minimax-video
-调一次 `.agents/skills/minimax-video/scripts/generate.py` 生成 6 秒数字人开场，用于嵌入 HTML 汇报页封面。
-
-prompt 写法（结合本次汇报）：
-- 主体：与 audience={run.audience}/style={run.style} 匹配的职场人（如「中国职场女性，简洁正装」「中年管理者，深色西装」）
-- 动作：自然对镜头自信讲解开场
-- 场景：现代会议室 / 屏幕前 / 自然光中景
-- 加摄影词：「中景」「专业摄影」「45 度角」
-
-```bash
-python3 .agents/skills/minimax-video/scripts/generate.py \\
-  --prompt "<你定制的 prompt>" \\
-  --duration 6 \\
-  --output data/outputs/{run.task_id}/video/intro.mp4
-```
-
-# 失败处理
-- `MINIMAX_API_KEY` 缺失 → degraded=true / no_api_key
-- API quota_exhausted → 已生成部分保留，degraded=true / quota_exhausted
-- 视频失败但 TTS 成功 → 保留 audio_segments，intro_video=null，不阻塞
-- 两个都失败 → degraded=true 让 pipeline 走降级
-
-# 输出 schema（最终一段 ```json``` 代码块）
-{{
-  "audio_segments": [
-    {{"index": 1, "text": "...", "voice": "male-qn-qingse",
-      "path": "data/outputs/{run.task_id}/audio/01.mp3",
-      "duration_estimate_sec": 6.4, "ok": true}}
-  ],
-  "subtitle_path": "data/outputs/{run.task_id}/audio/subtitles.srt",
-  "intro_video": {{
-    "path": "data/outputs/{run.task_id}/video/intro.mp4",
-    "duration": 6,
-    "prompt": "...",
-    "ok": true
-  }},
-  "voice_style": "{run.style}",
-  "tts_provider": "minimax",
-  "tts_model": "speech-02-hd",
-  "video_provider": "minimax-hailuo",
-  "video_model": "MiniMax-Hailuo-02",
-  "degraded": false,
-  "degrade_reason": null
-}}
-
-# 重要：最终回复硬约束
-不管 skill 调用结果如何（成功 / quota 耗尽 / 网络失败），你的最终回复**必须**以一段 ```json``` 代码块结尾，包含上面 schema 的所有字段。失败的段把 ok=false、degraded=true、degrade_reason 填准即可。**不要**把 generate.py 的 stdout 直接当成回复贴出来，要自己整合后写 JSON。"""
+        provider = _current_video_provider()
+        body = build_prompt_for_provider(
+            provider=provider,
+            task_id=run.task_id,
+            duration=run.duration,
+            audience=run.audience,
+            style=run.style,
+            script=script,
+            slides_json=json.dumps(slides, ensure_ascii=False)[:800],
+            narrations_json=json.dumps(narrations, ensure_ascii=False)[:600],
+            narrations_count=len(narrations),
+        )
 
     elif step == "review":
         core = prev["upward_optimization"].output_json or prev["point_extraction"].output_json or {}
@@ -560,6 +659,69 @@ def _persist_step(run: TaskRun, s: StepState) -> None:
             (d / "script.md").write_text(script, encoding="utf-8")
 
 
+def _write_srt_from_narrations(run: TaskRun, narrations: list[dict]) -> str | None:
+    """none 模式专用:从 narrations 直接生成 SRT 字幕落盘,不依赖 agent."""
+    if not narrations:
+        return None
+    audio_dir = run.output_dir() / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    srt_path = audio_dir / "subtitles.srt"
+
+    def _fmt(ts: float) -> str:
+        h = int(ts // 3600); m = int((ts % 3600) // 60)
+        s = int(ts % 60); ms = int((ts - int(ts)) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    lines: list[str] = []
+    t = 0.0
+    for i, n in enumerate(narrations, 1):
+        text = (n.get("text") or "").strip() if isinstance(n, dict) else str(n).strip()
+        if not text:
+            continue
+        # 简单按字符数估时长,中文每字 0.18s,最少 2s
+        dur = max(2.0, len(text) * 0.18)
+        lines.append(f"{i}\n{_fmt(t)} --> {_fmt(t + dur)}\n{text}\n")
+        t += dur
+    srt_path.write_text("\n".join(lines), encoding="utf-8")
+    return str(srt_path.relative_to(run.output_dir().parent.parent))
+
+
+def _build_html_artifact(
+    run: TaskRun, s: StepState, prev: dict[str, StepState],
+) -> None:
+    """html_design step success 后,后端真正渲染 self-contained 投屏页."""
+    copy_step = prev.get("copywriting")
+    if not copy_step or not copy_step.output_json:
+        return
+    review_step = next((x for x in run.steps if x.step == "review" and x.output_json), None)
+    video_step  = next((x for x in run.steps if x.step == "video_production" and x.output_json), None)
+    try:
+        result = build_presentation(
+            task_id=run.task_id,
+            title=run.title,
+            audience=run.audience,
+            duration=run.duration,
+            style=run.style,
+            report_type=run.report_type,
+            copywriting=copy_step.output_json,
+            review=review_step.output_json if review_step else None,
+            video_meta=video_step.output_json if video_step else None,
+            output_root=run.output_dir(),
+        )
+        # 把 builder 结果合并进 html_design.output_json,前端 / 管台能直接看到
+        merged = dict(s.output_json or {})
+        merged["builder"] = result
+        merged["index_path"] = result.get("rel_path")
+        s.output_json = merged
+        _persist_step(run, s)
+        log.info(
+            "html-builder: %s pages=%s bytes=%s",
+            result.get("rel_path"), result.get("pages"), result.get("bytes"),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.exception("html-builder failed for %s: %s", run.task_id, e)
+
+
 def _persist_final(run: TaskRun) -> None:
     """整体 task summary 落盘."""
     d = run.output_dir()
@@ -575,10 +737,59 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
     await _broadcast(run, "task.step", _step_event(s))
 
     # 群聊开场白：让 agent 先在群里说一句"我准备做 X"
-    intro = STEP_INTRO.get(s.step) or f"我开始处理 {s.label}"
-    intro_msg = _chat_msg(s.agent, intro, kind="intro")
+    intro_text = STEP_INTRO.get(s.step) or f"我开始处理 {s.label}"
+    # video_production 的开场白根据 provider 自适应
+    if s.step == "video_production":
+        provider = _current_video_provider()
+        if provider.id == "minimax":
+            intro_text = "我用 MiniMax TTS + Hailuo 数字人给每段讲稿配音。"
+        elif provider.id == "none":
+            intro_text = "当前是「仅字幕」模式,我只生成 SRT。"
+        else:
+            intro_text = f"当前数字人源 = {provider.display_name},暂未接好,我走降级。"
+    intro_msg = _chat_msg(s.agent, intro_text, kind="intro")
     _persist_chat(run, intro_msg)
     await _broadcast(run, "chat.message", intro_msg)
+
+    # video_production 短路:provider 未实现 或 none 模式 → 不调 agent,后端直接出降级 JSON
+    if s.step == "video_production":
+        provider = _current_video_provider()
+        # 走短路的两种情况:
+        #   1) 占位 provider(heygen / sadtalker 等)→ 纯 stub
+        #   2) none 模式 → 后端直接生成 SRT 字幕,不去喊 agent
+        if (not provider.implemented) or provider.id == "none":
+            narrations = (prev["copywriting"].output_json or {}).get("narrations") or []
+            payload = stub_response_payload(
+                provider, narrations_count=len(narrations), style=run.style,
+            )
+            if provider.id == "none":
+                srt_path = _write_srt_from_narrations(run, narrations)
+                if srt_path:
+                    payload["subtitle_path"] = srt_path
+                    payload["degrade_reason"] = "subtitle_only_mode"
+            s.output_json = payload
+            s.output_text = json.dumps(s.output_json, ensure_ascii=False, indent=2)
+            s.provider = "stub"
+            s.model = provider.video_model or "n/a"
+            s.status = "success"
+            _persist_step(run, s)
+            s.ended_at = time.time()
+            await _broadcast(run, "task.step", _step_event(s))
+            if provider.id == "none":
+                summary = f"✓ 仅字幕模式,SRT 已生成({len(narrations)} 段)"
+            else:
+                summary = f"⚠ 数字人源 {provider.display_name} 未接入,已写入降级元数据"
+            msg = _chat_msg(s.agent, summary, kind="result")
+            msg["artifacts"] = _step_artifacts(run.task_id, s.step, has_json=True)
+            _persist_chat(run, msg)
+            await _broadcast(run, "chat.message", msg)
+            await _broadcast(run, "task.artifact", {
+                "step": s.step, "kind": s.step, "ready": True,
+                "has_json": True,
+                "url_text": f"/api/tasks/{run.task_id}/exports/{s.step}.txt",
+                "url_json": f"/api/tasks/{run.task_id}/exports/{s.step}.json",
+            })
+            return
 
     prompt = _step_prompt(s.step, run, prev)
     try:
@@ -607,6 +818,9 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         )
         # 落盘
         _persist_step(run, s)
+        # html_design 成功后,后端实际渲染 self-contained HTML 投屏页
+        if s.step == "html_design":
+            _build_html_artifact(run, s, prev)
     except Exception as e:  # noqa: BLE001
         s.error = str(e)[:500]
         s.status = "failed"
@@ -618,6 +832,14 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         if s.status == "success":
             summary = _summarize_output(s.step, s.output_json, s.output_text)
             result_msg = _chat_msg(s.agent, summary, kind="result")
+            # 把该 step 产物 URL 嵌进 message,前端 Bubble 直接渲染成可点击 chip
+            result_msg["artifacts"] = _step_artifacts(
+                run.task_id, s.step, has_json=s.output_json is not None,
+            )
+            # agent 的"思考过程"(LLM 文本去掉 JSON 块剩下的解释性内容)
+            analysis = _extract_analysis(s.output_text)
+            if analysis:
+                result_msg["analysis"] = analysis
             _persist_chat(run, result_msg)
             await _broadcast(run, "chat.message", result_msg)
             await _broadcast(run, "task.artifact", {
@@ -786,8 +1008,7 @@ async def execute(run: TaskRun) -> None:
     _persist_chat(run, closing)
     await _broadcast(run, "chat.message", closing)
     await _broadcast(run, "task.done", {"status": run.status})
-    for q in list(run.subscribers):
-        await q.put(None)
+    # 不再 put(None) 强制断流 — 让 SSE 保持长连接,用户随时可以发反馈触发 refine
 
     # 推到管台 pipelines
     try:
@@ -1028,6 +1249,8 @@ async def _run_step_with_instruction(
             completion_tokens=res.completion_tokens,
         )
         _persist_step(run, s)
+        if s.step == "html_design":
+            _build_html_artifact(run, s, prev)
     except Exception as e:  # noqa: BLE001
         s.error = str(e)[:500]
         s.status = "failed"
@@ -1038,6 +1261,12 @@ async def _run_step_with_instruction(
         if s.status == "success":
             summary = _summarize_output(s.step, s.output_json, s.output_text)
             msg = _chat_msg(s.agent, summary, kind="result")
+            msg["artifacts"] = _step_artifacts(
+                run.task_id, s.step, has_json=s.output_json is not None,
+            )
+            analysis = _extract_analysis(s.output_text)
+            if analysis:
+                msg["analysis"] = analysis
             _persist_chat(run, msg)
             await _broadcast(run, "chat.message", msg)
             await _broadcast(run, "task.artifact", {

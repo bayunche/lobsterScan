@@ -6,6 +6,9 @@ import PageHeader from "@/components/PageHeader";
 import StatusDot from "@/components/StatusDot";
 
 const BASE = process.env.NEXT_PUBLIC_ADMIN_API_BASE || "http://localhost:8100";
+const WEB_BASE = process.env.NEXT_PUBLIC_WEB_API_BASE || "http://localhost:8000";
+
+type ArtifactItem = { name: string; size: number; url: string };
 
 type Step = {
   step: string;
@@ -27,15 +30,30 @@ type Run = {
 export default function PipelineDetail() {
   const { id } = useParams<{ id: string }>();
   const [run, setRun] = useState<Run | null>(null);
+  const [presentationHref, setPresentationHref] = useState<string | null>(null);
 
   async function load() {
     const r = await fetch(`${BASE}/admin/api/pipelines/${id}`, { cache: "no-store" });
     setRun(await r.json());
   }
 
+  // 嗅探 web-presentation/index.html 是否已经由 html_builder 产出
+  async function probePresentation() {
+    try {
+      const r = await fetch(`${WEB_BASE}/api/tasks/${id}/exports`, { cache: "no-store" });
+      if (!r.ok) return setPresentationHref(null);
+      const d: { items?: ArtifactItem[] } = await r.json();
+      const hit = (d.items || []).find((it) => it.name === "web-presentation/index.html");
+      setPresentationHref(hit ? `${WEB_BASE}${hit.url}` : null);
+    } catch {
+      setPresentationHref(null);
+    }
+  }
+
   useEffect(() => {
     load();
-    const t = setInterval(load, 2000);
+    probePresentation();
+    const t = setInterval(() => { load(); probePresentation(); }, 2000);
     return () => clearInterval(t);
   }, [id]);
 
@@ -55,6 +73,24 @@ export default function PipelineDetail() {
       <PageHeader
         title={run.title ?? run.task_id}
         desc={`${run.report_type ?? "—"} · ${run.status}`}
+        right={
+          presentationHref ? (
+            <a
+              href={presentationHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-sky-600 px-3 py-1.5 text-sm text-sky-700 hover:bg-sky-50"
+            >
+              ▶ 打开投屏汇报页
+            </a>
+          ) : (
+            <span className="text-xs text-neutral-400">
+              {run.status === "done" || run.status === "partial"
+                ? "投屏页未生成"
+                : "投屏页待 html_design 步骤完成"}
+            </span>
+          )
+        }
       />
 
       <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">

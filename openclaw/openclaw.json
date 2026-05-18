@@ -86,10 +86,26 @@
     },
     "minimax": {
       "model": "abab7-chat-preview"
-    }
+    },
+    "openai": {},
+    "qwen": {},
+    "glm": {}
   },
   "tts": {
     "provider": "minimax",
     "model": "speech-02-hd"
+  },
+  "video": {
+    "provider": "minimax",
+    "model": "MiniMax-Hailuo-2.3"
+  },
+  "image": {
+    "provider": "openai-gpt-image-2",
+    "model": "gpt-image-2",
+    "base_url": "https://tiantianapi.com/v1"
+  },
+  "music": {
+    "provider": "minimax-music",
+    "model": "music-2.6"
   }
 }
