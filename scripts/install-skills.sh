@@ -13,20 +13,27 @@ MAP[material]="kb-retriever material-parser"
 MAP[point-extractor]="point-extractor"
 MAP[structure]="report-structure"
 MAP[upward-opt]="upward-translator humanizer"
-MAP[copywriter]="copywriter"
+MAP[copywriter]="copywriter web-video-presentation"
 MAP[html-designer]="web-design-engineer web-video-presentation gpt-image-2"
-MAP[video-producer]="web-video-presentation heygen-avatar heygen-video elevenlabs playwright-recording ffmpeg moviepy minimax-tts minimax-video minimax-music"
+MAP[video-producer]="web-video-presentation elevenlabs playwright-recording ffmpeg moviepy minimax-tts minimax-video minimax-music klingai heygen"
 MAP[reviewer]="report-reviewer humanizer"
 
 find_skill_src() {
   local name="$1"
-  for base in \
-    "$REPO_ROOT/skills/custom/$name" \
-    "$REPO_ROOT/skills/third-party/garden-skills/skills/$name" \
-    "$REPO_ROOT/skills/third-party/humanizer" \
-    "$REPO_ROOT/skills/third-party/heygen-skills/$name" \
+  # 候选源:每条都必须用 $name 参与匹配,避免「固定路径恒命中」导致的静默错链。
+  # humanizer 是单 skill 仓库(skills/third-party/humanizer/SKILL.md),只有当请求的
+  # name 恰好等于 "humanizer" 时才走那条分支——否则会把任意未匹配的 skill 错链到它。
+  local candidates=(
+    "$REPO_ROOT/skills/custom/$name"
+    "$REPO_ROOT/skills/third-party/garden-skills/skills/$name"
+    "$REPO_ROOT/skills/third-party/heygen-skills/$name"
+    "$REPO_ROOT/skills/third-party/claude-code-video-toolkit/.claude/skills/$name"
     "$REPO_ROOT/skills/third-party/claude-code-video-toolkit/skills/$name"
-  do
+  )
+  if [[ "$name" == "humanizer" ]]; then
+    candidates+=("$REPO_ROOT/skills/third-party/humanizer")
+  fi
+  for base in "${candidates[@]}"; do
     if [[ -d "$base" && -f "$base/SKILL.md" ]]; then
       echo "$base"; return
     fi
