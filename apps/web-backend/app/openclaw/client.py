@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,75 +74,27 @@ async def run_agent_turn(
     agent_id: str,
     message: str,
     model: str | None = None,
-    timeout_sec: int = 180,
+    timeout_sec: int = 900,
     extra_env: dict[str, str] | None = None,
+    on_progress=None,
 ) -> TurnResult:
-    """触发一次 agent turn，返回结构化结果。
+    """触发一次 agent turn,返回结构化结果。
 
-    架构：每个角色独立 OpenClaw 实例（profile = lobster-<id>），
-    state/config/auth 完全隔离。运行模式 --local（embedded brain，不经 gateway）。
+    现在是 thin wrapper · 真正实现见 `app/orchestrator/agent_backend.py:OpenClawSubprocessBackend`,
+    通过 `get_default_backend()` 单例取(测试可 set_default_backend(mock) 注入)。
 
-    extra_env: 注入给 subprocess 的环境变量；Agent 用 Bash 跑脚本时可用，
-    比如 video-producer 用 minimax-tts skill 时需要 MINIMAX_API_KEY。
+    抽象的好处:
+      - read-loop 读 stdout/stderr,timeout 时累积 buffer 不丢
+      - on_progress callback 钩子(给前端 SSE 推 agent 中间事件)
+      - 未来切换到 OpenClawGatewayBackend / DirectLLMBackend 不动 pipeline
     """
-    import os as _os
-    profile = f"lobster-{agent_id}"
-    # OPENCLAW_BIN 由 scripts/dev.sh 注入(优先项目自托管的 ./node_modules/.bin/openclaw);
-    # 兜底再用 PATH 里的 "openclaw",方便单独跑 uvicorn 也能工作。
-    oc_bin = _os.environ.get("OPENCLAW_BIN") or "openclaw"
-    cmd = [
-        oc_bin, "--profile", profile,
-        "agent", "--agent", "main", "--local", "--json",
-        "-m", message,
-    ]
-    if model:
-        cmd += ["--model", model]
-    log.info("openclaw turn · profile=%s (%s chars) · env_extra=%s",
-             profile, len(message), list((extra_env or {}).keys()))
-    env = _os.environ.copy()
-    if extra_env:
-        env.update(extra_env)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
-    except asyncio.TimeoutError:
-        proc.kill()
-        raise
-
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"openclaw agent exit={proc.returncode}: "
-            f"{(err or b'').decode('utf-8', errors='replace')[:500]}"
-        )
-
-    text = out.decode("utf-8", errors="replace")
-    data = _parse_top_object(text)
-
-    visible = _walk_find(data, "finalAssistantVisibleText") or _walk_find(data, "finalAssistantRawText") or ""
-    # OpenClaw 某些 plugin(如 lossless-claw)会把 agent 输出包成 payloads 数组,
-    # 此时没有 finalAssistantVisibleText,visible 文本在 payloads[i].text 里。
-    if not visible:
-        payloads = _walk_find(data, "payloads")
-        if isinstance(payloads, list) and payloads:
-            parts = [p.get("text") for p in payloads if isinstance(p, dict) and p.get("text")]
-            visible = "\n".join(parts) if parts else ""
-    trace = _walk_find(data, "executionTrace") or {}
-    usage = _walk_find(data, "usage") or {}
-
-    return TurnResult(
-        text=visible,
-        provider=trace.get("winnerProvider"),
-        model=trace.get("winnerModel"),
-        prompt_tokens=int(usage.get("input") or 0),
-        completion_tokens=int(usage.get("output") or 0),
-        cache_read_tokens=int(usage.get("cacheRead") or 0),
-        total_tokens=int(usage.get("total") or 0),
-        raw=data,
+    # 延迟 import 避免循环依赖(agent_backend 反过来 import 本模块的 TurnResult)
+    from ..orchestrator.agent_backend import get_default_backend
+    backend = get_default_backend()
+    return await backend.run_turn(
+        agent_id=agent_id, message=message, model=model,
+        timeout_sec=timeout_sec, extra_env=extra_env,
+        on_progress=on_progress,
     )
 
 
@@ -149,15 +102,119 @@ async def run_agent_turn(
 _JSON_FENCE = re.compile(r"```(?:json)?\s*\n(.*?)\n\s*```", re.S)
 
 
+def _fix_inner_quotes(raw: str) -> str:
+    """LLM 写 `"note": "...岗位\"人工智能\"..."` 时 inner-quote 没转义。
+    扫一遍 string token,把不合 JSON 文法的孤立 ASCII " 替换成 「」(配对) 或 \\"."""
+    out: list[str] = []
+    i = 0
+    n = len(raw)
+    in_str = False
+    while i < n:
+        c = raw[i]
+        if not in_str:
+            out.append(c)
+            if c == '"':
+                in_str = True
+            i += 1
+            continue
+        # 进入 string 内部
+        if c == '\\':
+            # 已经是转义,原样带过下一个字符
+            out.append(c)
+            if i + 1 < n:
+                out.append(raw[i + 1])
+                i += 2
+            else:
+                i += 1
+            continue
+        if c == '"':
+            # 看后面是不是合法的 JSON string 终止符
+            j = i + 1
+            while j < n and raw[j] in ' \t':
+                j += 1
+            if j < n and raw[j] in ',:}]\n\r':
+                # 合法终止
+                out.append(c)
+                in_str = False
+                i += 1
+                continue
+            # 否则视为 inner-quote 没转义 — 找下一个 " 作为配对
+            k = i + 1
+            depth_safe = 0
+            while k < n and depth_safe < 80:
+                if raw[k] == '\\':
+                    k += 2; depth_safe += 1; continue
+                if raw[k] == '"':
+                    break
+                k += 1; depth_safe += 1
+            if k < n and raw[k] == '"':
+                # 看 k 后是不是同样不合法终止 → 是的话才说明是 inner-quote 对
+                m = k + 1
+                while m < n and raw[m] in ' \t':
+                    m += 1
+                if m < n and raw[m] in ',:}]\n\r':
+                    # k 是合法 string 终止符,不是 inner-quote 对,保持
+                    out.append(c)
+                    in_str = False
+                    i += 1
+                    continue
+                # k 也是 inner-quote → 替成 「」
+                inner = raw[i + 1:k]
+                out.append('「')
+                out.append(inner.replace('"', '\\"'))
+                out.append('」')
+                i = k + 1
+                continue
+            # 没找到配对 → 保持原样
+            out.append(c)
+            in_str = False
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
+
+def _try_loose_json(raw: str) -> dict[str, Any] | None:
+    """LLM 输出 JSON 偶尔有 inner-quote 没转义 / trailing comma / 单引号,做几轮宽松修复."""
+    # 1. trailing comma 清掉
+    cleaned = re.sub(r",(\s*[}\]])", r"\1", raw)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    # 2. raw_decode 局部解析 — 取最大可解析前缀
+    try:
+        dec = json.JSONDecoder()
+        obj, _ = dec.raw_decode(cleaned.lstrip())
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    # 3. inner-quote 救星:状态机扫一遍替换
+    fixed = _fix_inner_quotes(cleaned)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 def extract_json(text: str) -> dict[str, Any] | None:
     """从 agent 的回复里抠出第一个 JSON 代码块（Agent 提示词要求这种格式）."""
+    # 先按 fence 严格 parse
     for m in _JSON_FENCE.finditer(text):
         try:
             return json.loads(m.group(1))
         except json.JSONDecodeError:
-            continue
-    # 兜底：尝试直接 parse
+            pass
+    # 再按 fence loose parse(救 inner-quote / trailing comma)
+    for m in _JSON_FENCE.finditer(text):
+        loose = _try_loose_json(m.group(1))
+        if loose is not None:
+            return loose
+    # 兜底:整段直接尝试 strict + loose
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
-        return None
+        return _try_loose_json(text)
