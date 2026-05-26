@@ -270,20 +270,23 @@ DURATION_PROFILE: dict[str, dict] = {
     "1分钟": {
         "label":         "1 分钟精要",
         "structure":     "总-分",
-        "chapters_n":    "3-4",                 # 章节总数
-        "narrations_n":  "4-5",                 # narration 段数
-        "narration_len": "30-50",               # 单段字数
+        "chapters_n":    "5-6",                 # 章节总数(对齐 PRD:HTML 投屏 ≥ 5 页)
+        "narrations_n":  "4-5",                 # narration 段数(cover 无 narration,可少于章节)
+        "narration_len": "40-60",               # 单段字数(4-5 段 × 40-60 ≈ 200-300 总)
         "script_words":  "200-300",
         "structure_template": (
             "1. cover(封面 · 标题 + 一句话定位)\n"
             "2. summary(总览 · 核心一句话 + 1 个量化数据)\n"
-            "3. completed | risks(择一,选最重要的一个分点)\n"
-            "4. next_steps(收束 · 1-2 条最关键动作)"
+            "3. completed(分1 · 已落地最关键 1 点 + 量化结果)\n"
+            "4. risks(分2 · 最关键风险 + 影响;无风险时写'暂无显著风险待办')\n"
+            "5. next_steps(收束 · 1-2 条最关键动作 + owner)\n"
+            "6. closing(可选 · 一句话承诺或会议安排)"
         ),
         "writing_principle": (
             "极致克制 — 一个观点 + 一个数字 + 一个动作。"
             "**不要展开**,**不要案例**,**不要细节**。"
             "用户没时间听铺垫,30 秒进入核心数据。"
+            "5-6 章节是为了投屏页数下限,不是为了讲更多 — 每页字更少、留白更多。"
         ),
     },
     "3分钟": {
