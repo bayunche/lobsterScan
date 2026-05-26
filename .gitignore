@@ -26,10 +26,14 @@ __pycache__/
 # Data & runtime（含 apps/*/data/ 这种各应用自带的本地数据目录）
 **/data/uploads/*
 **/data/outputs/*
+**/data/.logs/
 !**/data/uploads/.gitkeep
 !**/data/outputs/.gitkeep
 *.db
 *.db-journal
+
+# Playwright MCP 工具自动产物(截图 / 控制台 log / yaml 快照)
+.playwright-mcp/
 
 # OpenClaw 私有目录与备份
 openclaw/agents/
