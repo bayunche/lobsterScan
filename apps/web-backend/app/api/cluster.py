@@ -99,6 +99,8 @@ class FeatReportRequest(BaseModel):
     audience: str = "直属领导"
     duration: str = "3分钟"
     style: str = "简洁正式"
+    # 用户补充说明 — 最高优先级业务指令,贯穿 8 个 step
+    supplement: str = ""
     file_ids: list[str] = []
 
 
@@ -347,6 +349,7 @@ async def feat_report(req: FeatReportRequest) -> dict:
         duration=req.duration,
         style=req.style,
         raw_text=raw_text,
+        supplement=req.supplement,
     )
 
     # 用户系统消息：带附件 + 任务元信息

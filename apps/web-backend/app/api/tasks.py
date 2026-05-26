@@ -18,9 +18,35 @@ class CreateTaskRequest(BaseModel):
     report_type: Literal["daily", "project_progress", "review", "introduction"]
     title: str
     audience: Literal["直属领导", "团队内部", "跨部门", "客户"] = "直属领导"
-    duration: Literal["1分钟", "3分钟", "5分钟"] = "3分钟"
+    # 汇报时长 → 总分结构:
+    #   1分钟  · 总-分 精要(3-4 章节 / 4-5 段 narration / 200-300 字)
+    #   3分钟  · 总-分-总 标准(5-6 章节 / 7-9 段 / 500-750 字)
+    #   5分钟  · 总-分-分-总 展开(7-8 章节 / 12-15 段 / 900-1200 字,带具体案例)
+    duration: Literal["1分钟", "3分钟", "5分钟"] = Field(
+        default="3分钟",
+        description="汇报时长 — 决定章节数、段落字数、是否展开案例细节",
+    )
     style: Literal["简洁正式", "成果突出", "问题导向", "述职风"] = "简洁正式"
     raw_text: str = ""
+    # 用户补充说明 — 跨 8 个 step 全局共享,作为最高优先级业务指令注入到所有 agent prompt 头部。
+    # 示例(几种典型场景,用户可参考):
+    #   1) 受众微调:    "audience 实际是市领导,语气更稳健保守,避免主观判断"
+    #   2) 重点引导:    "重点突出对客户合同金额的影响,客户名称需要保密用 X 公司"
+    #   3) 风险显化:    "本周延迟交付要如实说明,不要美化,给出具体补救计划"
+    #   4) 内容裁剪:    "不要提及 Project Atlas,所有数据脱敏到部门级"
+    #   5) 表达约束:    "讲稿要给市领导念,数据前置,每段不超过 25 字"
+    supplement: str = Field(
+        default="",
+        description=(
+            "用户补充说明(可选 · 最高优先级指令,所有 agent 都会看到)。"
+            "用一两句话讲清楚:受众真实身份 / 重点突出什么 / 不要提什么 / 表达约束。"
+        ),
+        examples=[
+            "对市领导稳健保守,优先突出已落地能力的业务价值;不要 emoji 或夸大词。",
+            "突出客户合同影响,客户名脱敏成 X 公司;风险要如实说不要美化。",
+            "讲稿要节奏感强,数据前置;每段不超过 25 字,适合数字人朗读。",
+        ],
+    )
     file_ids: list[str] = Field(default_factory=list)
     user_hints: dict = Field(default_factory=dict)
 
@@ -50,6 +76,7 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
         duration=req.duration,
         style=req.style,
         raw_text=req.raw_text,
+        supplement=req.supplement,
     )
     # 异步跑 pipeline，不阻塞响应
     asyncio.create_task(pipeline.execute(run))

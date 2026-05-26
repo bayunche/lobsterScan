@@ -14,6 +14,33 @@ const AUDIENCE = ["直属领导", "团队内部", "跨部门", "客户"] as cons
 const DURATION = ["1分钟", "3分钟", "5分钟"] as const;
 const STYLE    = ["简洁正式", "成果突出", "问题导向", "述职风"] as const;
 
+// 时长 → 总分结构 说明(给用户预期 + agent 写法约束的明示)
+const DURATION_HINT: Record<(typeof DURATION)[number], string> = {
+  "1分钟": "总-分 精要 · 4-5 段口播 · 200-300 字 · 只讲核心数据 + 1 个动作",
+  "3分钟": "总-分-总 标准 · 7-9 段 · 500-750 字 · 3 个分点 + 收束",
+  "5分钟": "总-分-分-总 展开 · 12-15 段 · 900-1200 字 · 可带具体案例",
+};
+
+// supplement 示例 — 几种典型用法,点击 chip 填入 textarea
+const SUPPLEMENT_EXAMPLES: { label: string; text: string }[] = [
+  {
+    label: "市领导稳健版",
+    text: "对市领导稳健保守,优先突出已落地能力的业务价值;不要 emoji 或夸大词。",
+  },
+  {
+    label: "客户脱敏版",
+    text: "客户名称统一脱敏为 X 公司;突出对客户合同的影响,不要透露具体金额。",
+  },
+  {
+    label: "风险显化版",
+    text: "本周延迟交付要如实说明,不要美化;风险段要给出具体补救计划和 owner。",
+  },
+  {
+    label: "数据前置版",
+    text: "讲稿要节奏感强,数据前置;每段不超过 25 字,适合数字人朗读。",
+  },
+];
+
 const DEMO = `本周做了客户回访，完成 18 个客户沟通，其中 12 个确认继续推进。活动页面设计完成了初稿，产品和运营都看过一轮。测试发现 3 个问题，其中 1 个比较影响上线。数据整理完成 80%。客户最终确认时间还没定，希望领导帮忙协调一下。下周准备完成问题修复、客户确认和上线前验收。`;
 
 const SESSION_KEY = "lobster-chat-session";
@@ -48,6 +75,7 @@ export default function FeatReportPage() {
   const [audience, setAudience] = useState<(typeof AUDIENCE)[number]>("直属领导");
   const [duration, setDuration] = useState<(typeof DURATION)[number]>("3分钟");
   const [style, setStyle] = useState<(typeof STYLE)[number]>("简洁正式");
+  const [supplement, setSupplement] = useState("");
   const [rawText, setRawText] = useState("");
   const [files, setFiles] = useState<{ name: string; file_id: string; size: number; mime: string }[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -113,6 +141,7 @@ export default function FeatReportPage() {
         body: JSON.stringify({
           session_id: sid, raw_text: rawText,
           title, report_type: reportType, audience, duration, style,
+          supplement,
           file_ids: files.map(f => f.file_id),
         }),
       });
@@ -248,11 +277,43 @@ export default function FeatReportPage() {
           </Row>
 
           <Row label="时长">
-            <ChipRow value={duration} options={DURATION} onPick={setDuration} />
+            <div className="duration-wrap">
+              <ChipRow value={duration} options={DURATION} onPick={setDuration} />
+              <div className="duration-hint">{DURATION_HINT[duration]}</div>
+            </div>
           </Row>
 
           <Row label="风格">
             <ChipRow value={style} options={STYLE} onPick={setStyle} />
+          </Row>
+
+          <Row label="补充">
+            <div className="supp-wrap">
+              <textarea
+                value={supplement}
+                onChange={(e) => setSupplement(e.target.value)}
+                rows={3}
+                placeholder="可选 · 跨所有 agent 的最高优先级指令(受众微调 / 重点引导 / 内容脱敏 / 表达约束)"
+                className="text-area supp-area"
+              />
+              <div className="supp-foot">
+                <span className="serial supp-foot-label">参考写法</span>
+                <div className="supp-chips">
+                  {SUPPLEMENT_EXAMPLES.map((ex) => (
+                    <button
+                      key={ex.label}
+                      type="button"
+                      onClick={() => setSupplement(ex.text)}
+                      className="supp-chip"
+                      title={ex.text}
+                    >
+                      {ex.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="serial supp-count">{supplement.length} 字</span>
+              </div>
+            </div>
           </Row>
         </section>
 
@@ -453,6 +514,49 @@ export default function FeatReportPage() {
         }
         :global(.text-area::placeholder) { color: var(--ink-mute); }
         .text-foot { color: var(--ink-mute); }
+
+        /* === 时长说明 === */
+        .duration-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+        .duration-hint {
+          font-family: var(--font-sans);
+          font-size: 0.78rem;
+          color: var(--ink-mute);
+          padding: 0.35rem 0.65rem;
+          background: rgba(0, 0, 0, 0.02);
+          border-left: 2px solid var(--seal);
+          border-radius: 0 4px 4px 0;
+          line-height: 1.55;
+        }
+
+        /* === supplement 输入区 === */
+        .supp-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+        :global(.supp-area) {
+          min-height: 80px !important;
+          font-size: 0.88rem !important;
+        }
+        .supp-foot {
+          display: flex; flex-wrap: wrap; align-items: center;
+          gap: 0.5rem;
+          font-size: 0.75rem;
+        }
+        .supp-foot-label { color: var(--ink-mute); margin-right: 0.25rem; }
+        .supp-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; flex: 1; }
+        .supp-chip {
+          padding: 0.2rem 0.65rem;
+          font-size: 0.75rem;
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          color: var(--ink-mute);
+          cursor: pointer;
+          transition: all var(--t-base) var(--ease);
+        }
+        .supp-chip:hover {
+          color: var(--seal);
+          border-color: var(--seal);
+          background: rgba(198, 84, 60, 0.04);
+        }
+        .supp-count { color: var(--ink-mute); margin-left: auto; }
 
         /* === 配置 === */
         .cfg {
