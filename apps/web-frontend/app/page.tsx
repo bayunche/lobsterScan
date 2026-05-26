@@ -92,6 +92,8 @@ export default function HomePage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [taskTitle, setTaskTitle] = useState<string>("");   // task 模式下顶部显示
+  const [taskStatus, setTaskStatus] = useState<string>(""); // running/done/partial/failed — 决定 refine chip 是否显示
+  const [refining, setRefining] = useState(false);          // refine chip 点击中,防双发
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -108,8 +110,9 @@ export default function HomePage() {
   useEffect(() => {
     if (taskId) {
       // task 会话模式:fetch 该 task 的 chat,SSE 直连 web-backend(避免 Next rewrites SSE 缓冲)
-      fetch(`/api/tasks/${taskId}`).then(r => r.ok ? r.json() : null)
-        .then(d => setTaskTitle(d?.title || taskId));
+      const refreshDetail = () => fetch(`/api/tasks/${taskId}`).then(r => r.ok ? r.json() : null)
+        .then(d => { setTaskTitle(d?.title || ""); setTaskStatus(d?.status || ""); });
+      refreshDetail();
       fetch(`/api/tasks/${taskId}/chat`).then(r => r.ok ? r.json() : { messages: [] })
         .then(d => setMessages(d.messages || []));
       const es = new EventSource(`${WEB_API_BASE}/api/tasks/${taskId}/events`);
@@ -121,11 +124,14 @@ export default function HomePage() {
         const m = JSON.parse((e as MessageEvent).data);
         setMessages(cur => cur.map(x => x.id === m.id ? m : x));
       });
+      // task.done 事件 → 刷新 status,触发 refine chip 行显示/隐藏
+      es.addEventListener("task.done", () => { refreshDetail(); });
       return () => es.close();
     }
     // 集群会话模式(默认)
     if (!sid) return;
     setTaskTitle("");
+    setTaskStatus("");
     fetch(`/api/cluster/chat/${sid}/messages`).then(r => r.json()).then(d => {
       const fromServer: ChatMsg[] = d.messages || [];
       setMessages(fromServer.length > 0 ? fromServer : initialMessages());
@@ -153,6 +159,23 @@ export default function HomePage() {
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
   }, [draft]);
+
+  // PRD §9.4 5 个快捷动作 → POST /tasks/{id}/refine
+  // 后端 REFINE_ACTION_MAP 决定重跑哪个 step + 下游级联,前端只发 action 名
+  async function refine(action: string) {
+    if (!taskId || refining) return;
+    setRefining(true);
+    try {
+      await fetch(`/api/tasks/${taskId}/refine`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      // 后端会异步开 refine_with_action,把 ack 通过 SSE 推回 chat,UI 不用做 optimistic 更新
+    } finally {
+      setRefining(false);
+    }
+  }
 
   async function send(text?: string) {
     const t = (text ?? draft).trim();
@@ -237,6 +260,18 @@ export default function HomePage() {
         </div>
 
         <footer className="composer">
+          {/* PRD §9.4 5 个快捷调整动作 — 仅 task 已完成态(done/partial)显示 */}
+          {taskId && (taskStatus === "done" || taskStatus === "partial") && (
+            <div className="refine-chips" aria-label="快捷调整">
+              <span className="chip-hint">快捷调整 →</span>
+              <button className="chip" disabled={refining} onClick={() => refine("shorter")} title="把讲稿砍 30-40%">再短一点</button>
+              <button className="chip" disabled={refining} onClick={() => refine("more_problem")} title="拔高风险与影响">更突出问题</button>
+              <button className="chip" disabled={refining} onClick={() => refine("more_formal")} title="升级到更书面正式语气">更正式一点</button>
+              <button className="chip" disabled={refining} onClick={() => refine("more_result")} title="强化已落地成果的量化数据">更突出成果</button>
+              <button className="chip" disabled={refining} onClick={() => refine("regenerate_segment")} title="重新生成全部讲稿">重新生成</button>
+              {refining && <span className="chip-busy">正在重做…</span>}
+            </div>
+          )}
           <div className="composer-pad">
             <button
               className="cp-icon"
@@ -434,6 +469,36 @@ export default function HomePage() {
           padding: 0.85rem 1.75rem 1.1rem;
           border-top: 1px solid var(--line);
           background: var(--paper);
+        }
+        .refine-chips {
+          max-width: 760px; margin: 0 auto 0.55rem;
+          display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;
+          font-size: 0.78rem;
+        }
+        .chip-hint {
+          color: var(--ink-mute);
+          letter-spacing: 0.04em;
+          margin-right: 0.2rem;
+        }
+        :global(.chip) {
+          padding: 0.3rem 0.7rem;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          background: var(--paper-warm);
+          color: var(--ink);
+          font-size: 0.78rem;
+          cursor: pointer;
+          transition: border-color var(--t-base) var(--ease), background var(--t-base) var(--ease);
+        }
+        :global(.chip:hover:not(:disabled)) {
+          border-color: var(--seal);
+          background: var(--paper);
+        }
+        :global(.chip:disabled) { opacity: 0.45; cursor: wait; }
+        .chip-busy {
+          color: var(--ink-mute);
+          font-style: italic;
+          margin-left: 0.3rem;
         }
         .composer-pad {
           max-width: 760px; margin: 0 auto;

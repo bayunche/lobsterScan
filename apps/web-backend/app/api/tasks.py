@@ -114,10 +114,59 @@ class RefineRequest(BaseModel):
     segment_id: str | None = None
 
 
+# PRD §9.4 5 个快捷动作 → step + instruction 映射。
+# 设计原则:
+#  - "更突出问题"重跑 point_extraction(回到分析师拔 risks,最彻底);其它都从 copywriting 起
+#  - "更正式"重跑 upward_optimization(表达教练的活,正确分工)
+#  - 级联下游影响自动由 _expand_impacted_steps 算
+#  - 业务方若觉得"更突出问题"应只调讲稿语气而不重提炼,把 step 改成 copywriting 即可
+REFINE_ACTION_MAP: dict[str, dict] = {
+    "shorter": {
+        "step": "copywriting",
+        "instruction": "用户要求把讲稿砍 30-40%,**保留最关键 facts_used 和钩子**,删铺垫与重复;narrations 段数可减,但 facts_in_pool 覆盖率不降。",
+        "user_note": "好,我让文书把讲稿精简,只留最关键的。",
+    },
+    "more_problem": {
+        "step": "point_extraction",
+        "instruction": "用户要求**更突出问题**:把 risks 提到 key_points 前列;每条 risk 必须有具体业务 impact;progress_status 实事求是不要美化。下游 copywriting 在 narration 中给风险段加强语气。",
+        "user_note": "明白,我让分析师把风险拔到更前面,文书也会调整讲稿语气。",
+    },
+    "more_formal": {
+        "step": "upward_optimization",
+        "instruction": "用户要求**更正式语气**:升级到更书面措辞,去口语化与拟人化;**禁用** emoji、感叹号、'我们''咱们'等口语词;数据前置,避免主观判断词。",
+        "user_note": "好,我让表达教练把语气调整得更书面、更稳健。",
+    },
+    "more_result": {
+        "step": "copywriting",
+        "instruction": "用户要求**更突出成果**:strengthening 已完成事项的量化结果,每条 completed 都要配具体数据(数字+单位);削减过程描述,重排顺序让成果段在风险段前。",
+        "user_note": "好,我让文书把已落地的成果讲得更突出、更带数据。",
+    },
+    "regenerate_segment": {
+        "step": "copywriting",
+        "instruction": "用户要求重新生成讲稿,请基于当前 ReportCore 重写 narrations(可换钩子、换叙述顺序),保持 info_retention.coverage_pct ≥ 60。",
+        "user_note": "好,我让文书重新写一版讲稿。",
+    },
+}
+
+
 @router.post("/tasks/{task_id}/refine")
 async def refine_task(task_id: str, req: RefineRequest) -> dict:
-    # V0：先记到 audit；真实 refine 需要重跑特定 step（后续扩）
-    return {"ok": True, "note": "refine 已接受，稍后接入真实重跑"}
+    run = pipeline.get_run(task_id)
+    if not run:
+        raise HTTPException(status_code=404)
+
+    plan = REFINE_ACTION_MAP.get(req.action)
+    if not plan:
+        raise HTTPException(status_code=400,
+                            detail={"error": {"code": "UNKNOWN_ACTION",
+                                              "biz_message": "暂不支持该快捷操作"}})
+
+    # 异步触发实际重跑(不阻塞 API 响应);chat 里会业务化广播进度
+    asyncio.create_task(pipeline.refine_with_action(
+        run=run, action=req.action, plan=plan, segment_id=req.segment_id,
+    ))
+
+    return {"ok": True, "message": plan["user_note"]}
 
 
 class UserMessageRequest(BaseModel):

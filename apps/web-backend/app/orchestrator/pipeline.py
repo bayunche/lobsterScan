@@ -2791,6 +2791,67 @@ def _expand_impacted_steps(steps: list[str]) -> set[str]:
     return set(order[earliest:])
 
 
+async def refine_with_action(
+    *,
+    run: TaskRun,
+    action: str,
+    plan: dict,
+    segment_id: str | None = None,
+) -> None:
+    """快捷按钮触发的 refine — 不走 coordinator LLM 解析,直接按 plan 重跑。
+
+    与 handle_user_feedback 的区别:
+      - 自由文本走 handle_user_feedback(coordinator LLM 决策走哪些 step)
+      - 5 个 PRD 快捷按钮走本函数(action → plan 是硬映射,无 LLM 中间层,快 + 稳)
+    plan 来源:api/tasks.py REFINE_ACTION_MAP[action]
+    """
+    target_step = plan["step"]
+    instruction = plan["instruction"]
+    user_note = plan["user_note"]
+    if segment_id and action == "regenerate_segment":
+        instruction = f"{instruction}\n\n**特别指定**:重写 segment_id={segment_id} 对应的 narration。"
+
+    # 1. coordinator 在 chat 里承接用户意图(已脱敏:不提 action 英文 enum)
+    ack = _chat_msg("coordinator", f"📝 {user_note}", kind="result")
+    _persist_chat(run, ack)
+    await _broadcast(run, "chat.message", ack)
+
+    # 2. 把 target_step + 下游全部 reset 为 pending,准备重跑
+    impacted = _expand_impacted_steps([target_step])
+    for s in run.steps:
+        if s.step in impacted:
+            s.status = "pending"
+            s.output_text = ""
+            s.output_json = None
+            s.started_at = s.ended_at = None
+            s.error = None
+    run.status = "running"
+    await _broadcast(run, "task.done", {"status": "running"})  # 前端切回"进行中"
+
+    # 3. 顺序重跑:target_step 带 instruction,下游 step 不带(让它们按上游新结果自然产)
+    prev: dict[str, StepState] = {s.step: s for s in run.steps if s.status == "success"}
+    for s in run.steps:
+        if s.status != "pending":
+            continue
+        instr_for_step = instruction if s.step == target_step else ""
+        await _run_step_with_instruction(s, run, prev, instr_for_step)
+        if s.status == "success":
+            prev[s.step] = s
+
+    # 4. 收尾
+    has_failed = any(s.status == "failed" for s in run.steps)
+    run.status = "partial" if has_failed else "done"
+    _persist_final(run)
+    closing = _chat_msg(
+        "coordinator",
+        "✅ 已按你的意见更新,请再看看。如果还要调整,可以继续点按钮或直接说。",
+        kind="result",
+    )
+    _persist_chat(run, closing)
+    await _broadcast(run, "chat.message", closing)
+    await _broadcast(run, "task.done", {"status": run.status})
+
+
 async def _run_step_with_instruction(
     s: StepState, run: TaskRun, prev: dict[str, StepState], instruction: str,
 ) -> None:
