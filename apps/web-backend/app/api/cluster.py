@@ -406,9 +406,10 @@ async def _run_and_bridge(session: dict, run) -> None:
                 session["messages"].append(msg)
                 await _broadcast(session, "chat.message", msg)
             elif event == "task.done":
+                # **不暴露 task_id 到正文**;链接走 link 字段(前端可点跳转),正文纯业务化
                 done_note = _make_msg(
                     "coordinator",
-                    f"✅ 整套材料已就绪。打开任务详情看完整产物 → /tasks/{run.task_id}",
+                    "✅ 整套材料已就绪。点这里看完整产物,或在此对话继续调整。",
                     kind="result",
                 )
                 done_note["link"] = f"/tasks/{run.task_id}"

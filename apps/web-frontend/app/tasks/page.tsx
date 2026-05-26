@@ -85,11 +85,11 @@ export default function TasksPage() {
                   <Link
                     href={{ pathname: "/", query: { task: it.task_id } }}
                     className="card"
+                    title={it.task_id}
                   >
                     <div className="card-row1">
                       <span className={"tag " + tag.cls}>{tag.label}</span>
                       <span className="title">{it.title || "(未命名)"}</span>
-                      <span className="serial id">{it.task_id}</span>
                     </div>
                     <div className="card-row2 serial">
                       <span>{it.report_type || "—"}</span>

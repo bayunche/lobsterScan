@@ -185,11 +185,10 @@ export default function HomePage() {
     <div className="page-bg">
       <div className="hall">
         {taskId && (
-          <div className="task-banner serial">
+          <div className="task-banner serial" title={taskId}>
             <span className="regmark" />
-            <span>正在查看任务对话 · </span>
-            <span className="font-mono">{taskId}</span>
-            {taskTitle && <> · <span>{taskTitle}</span></>}
+            <span>正在查看任务对话</span>
+            {taskTitle ? <> · <span>{taskTitle}</span></> : <> · <span>未命名任务</span></>}
             <span className="grow" />
             <Link href="/" className="back-link">⟵ 返回集群对话</Link>
             <Link href={`/tasks/${taskId}`} className="back-link ml-3">看任务详情 →</Link>

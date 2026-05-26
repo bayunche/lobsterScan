@@ -2556,6 +2556,7 @@ async def execute(run: TaskRun) -> None:
         gate_review_fn=_gate_review,
         chat_publisher=_chat_publisher,
         events_jsonl_path=events_jsonl_path,
+        agent_display=AGENT_DISPLAY,  # 用户可见 chat 文案显示名 ↔ agent_id 映射
     )
     log.info("harness done · reason=%s · chain=%s · visited=%s · events=%d",
              harness_result.get("reason"),

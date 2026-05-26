@@ -220,6 +220,7 @@ class Coordinator:
         agent_to_step: dict[str, str],
         step_to_agent: dict[str, str],
         default_next_step: dict[str, str],
+        agent_display: dict[str, str] | None = None,  # agent_id → 中文显示名(用户可见文案)
         max_revisits: int = 2,
         max_hops: int = 16,
         chat_publisher: Callable[[str, str, str], Awaitable[None]] | None = None,
@@ -229,9 +230,14 @@ class Coordinator:
         self.agent_to_step = agent_to_step
         self.step_to_agent = step_to_agent
         self.default_next_step = default_next_step
+        self.agent_display = agent_display or {}
         self.max_revisits = max_revisits
         self.max_hops = max_hops
         self._chat = chat_publisher  # 用于在 chat 里出 "→ 转交给 X" 气泡
+
+    def _disp(self, agent_id: str) -> str:
+        """agent_id → 中文显示名;缺映射时 fallback 到通用业务化称呼,**绝不暴露 raw id**。"""
+        return self.agent_display.get(agent_id) or "同事"
 
         state.bus.on("agent.handoff", self.on_handoff)
         state.bus.on("agent.failed", self.on_failed)
@@ -274,16 +280,18 @@ class Coordinator:
 
         to_raw = (event.payload or {}).get("to") or ""
         from_step = event.step_key or ""
-        from_agent_disp = self.step_to_agent.get(from_step, "上一位") or "上一位"
+        from_agent_id = self.step_to_agent.get(from_step, "") or ""
+        from_agent_disp = self._disp(from_agent_id) if from_agent_id else "上一位"
         target = self._resolve_target(to_raw)
 
-        # 导演引导 1:agent 没有有效 handoff → 推荐默认下一棒(劝告语气)
+        # 导演引导 1:agent 没有有效 handoff → 推荐默认下一棒(劝告语气,**不暴露 to_raw**)
         if target is None and from_step:
             target = self.default_next_step.get(from_step, "DONE")
-            recommended = self.step_to_agent.get(target, target) if target != "DONE" else "DONE"
+            recommended = self._disp(self.step_to_agent.get(target, "")) if target != "DONE" else None
             await self._announce(
-                f"💡 {from_agent_disp} 没明说交给谁(handoff.to={to_raw!r}),"
-                f"我看任务到这一步比较顺，建议下一棒给 {recommended}。"
+                f"💡 {from_agent_disp} 没明说接给谁,"
+                + (f"我看任务到这一步比较顺,建议下一棒给 {recommended}。"
+                   if recommended else "我先收尾,把已有的部分先呈上。")
             )
         elif target is None:
             target = "DONE"
@@ -293,12 +301,14 @@ class Coordinator:
             self._end("done")
             return
 
-        # 死循环防护 — 引导式
+        # 死循环防护 — 引导式(**用显示名,不暴露 agent_id**)
         if self.state.visited.get(target, 0) >= self.max_revisits:
             target2 = self.default_next_step.get(from_step, "DONE")
+            stuck_disp = self._disp(self.step_to_agent.get(target, ""))
+            next_disp = self._disp(self.step_to_agent.get(target2, "")) if target2 != "DONE" else None
             await self._announce(
-                f"⚠ {self.step_to_agent.get(target, target)} 已经跑过 {self.max_revisits} 次,"
-                f"这条路打转了。{'我先收尾。' if target2 == 'DONE' else f'换 {self.step_to_agent.get(target2, target2)} 试试。'}"
+                f"⚠ {stuck_disp} 已经跑过 {self.max_revisits} 次,这条路打转了。"
+                + (f"换 {next_disp} 试试。" if next_disp else "我先收尾。")
             )
             await self.state.emit("chain.revisit_limit", "coordinator", target,
                                   {"visited": self.state.visited.get(target)})
@@ -307,13 +317,14 @@ class Coordinator:
                 return
             target = target2
 
-        # 转交气泡 — 由"上一位"发声(更像她自己交棒,不是 backend 派活)
+        # 转交气泡 — 由"上一位"发声(用显示名,不暴露 agent_id)
         if self._chat is not None:
             from_agent = self.step_to_agent.get(from_step or "", "coordinator")
-            to_agent = self.step_to_agent.get(target, target)
+            to_agent_id = self.step_to_agent.get(target, target)
+            to_disp = self._disp(to_agent_id)
             reason = (event.payload or {}).get("reason", "")
             payload_hint = (event.payload or {}).get("payload_hint", "")
-            bubble = f"→ 接力 {to_agent}"
+            bubble = f"→ 接力 {to_disp}"
             if reason:
                 bubble += f" · {reason[:60]}"
             if payload_hint:
@@ -336,16 +347,17 @@ class Coordinator:
     async def on_failed(self, event: AgentEvent) -> None:
         from_step = event.step_key or ""
         from_agent = event.agent_id
-        err = (event.payload or {}).get("error", "未说明") or "未说明"
+        from_disp = self._disp(from_agent)
         next_step = self.default_next_step.get(from_step, "DONE")
-        recommended = self.step_to_agent.get(next_step, next_step) if next_step != "DONE" else "DONE"
-        # 导演在群里发声:谁卡住了,建议谁接手
+        next_agent_id = self.step_to_agent.get(next_step, "") if next_step != "DONE" else ""
+        recommended_disp = self._disp(next_agent_id) if next_agent_id else None
+        # 导演在群里发声:谁卡住了(**不暴露原始错误**,err 已落到 events.jsonl 留 trace)
         await self._announce(
-            f"⚠ {from_agent} 这边卡住了({err[:80]})。"
-            + (f"我建议 {recommended} 接着往下走,看能不能用现有产物。" if recommended != "DONE"
-               else "我先收尾,把已有的部分先呈上。")
+            f"⚠ {from_disp} 这边偶发卡顿。"
+            + (f"我让 {recommended_disp} 接着往下走,看能不能用现有产物。"
+               if recommended_disp else "我先收尾,把已有的部分先呈上。")
         )
-        # 仍然 emit handoff 让流水继续(否则卡死),但 chat 里清楚是"导演兜底"不是 agent 决定
+        # 仍然 emit handoff 让流水继续(否则卡死),内部 reason 用 agent_id 留 trace 用
         await self.state.emit("agent.handoff", "coordinator", from_step,
                               {"to": self.step_to_agent.get(next_step, "DONE"),
                                "reason": f"{from_agent} fail,导演兜底",
@@ -401,6 +413,7 @@ async def run_harness(
     gate_review_fn: Callable[..., Awaitable[None]] | None,
     chat_publisher: Callable[[str, str, str], Awaitable[None]] | None,
     events_jsonl_path: Path | None,
+    agent_display: dict[str, str] | None = None,  # agent_id → 显示名(pipeline.AGENT_DISPLAY)
     timeout_sec: int = 3600 * 2,
 ) -> dict:
     """跑一次完整 task 的 harness 主入口。返回最终 stats / chain / events 数量。
@@ -430,6 +443,7 @@ async def run_harness(
         state=state, workers=workers,
         agent_to_step=agent_to_step, step_to_agent=step_to_agent,
         default_next_step=default_next_step,
+        agent_display=agent_display,
         chat_publisher=chat_publisher,
     )
 
