@@ -33,6 +33,12 @@ class VideoProvider:
     notes: str = ""
     available_video_models: list[str] = field(default_factory=list)  # 给管台 UI 出下拉
     available_tts_models: list[str] = field(default_factory=list)
+    # ── Avatar 类 provider 通用字段(HeyGen / D-ID / 未来 OmniHuman) ──
+    # 这些是"内容标识 ID"维度,跟 video_model(技术 model id)正交。
+    # provider 自己声明默认值,user 在管台 Config 选 → 写 openclaw.json video.avatar_id 等。
+    avatar_id: str | None = None              # avatar_id 或 talking_photo_id(provider 自决)
+    voice_id: str | None = None
+    talking_photo_id: str | None = None       # HeyGen 把 photo 和 avatar 区分开;其它 provider 忽略
 
     def env_ok(self) -> tuple[bool, list[str]]:
         missing = [v for v in self.required_env if not os.environ.get(v)]
@@ -68,16 +74,48 @@ REGISTRY: dict[str, VideoProvider] = {
     ),
     "heygen": VideoProvider(
         id="heygen",
-        display_name="HeyGen Avatar(占位)",
-        implemented=False,
-        tts_skill="heygen-tts",
-        video_skill="heygen-avatar",
+        display_name="HeyGen V2(数字人 lip-sync)",
+        implemented=True,
+        # HeyGen 一个 skill 包揽 video + TTS(声音由 voice_id 选,内置 TTS)
+        tts_skill="heygen",          # 同一个 skill,subcommand voices 拿声音
+        video_skill="heygen",
         tts_provider_label="heygen-builtin",
-        tts_model="heygen-default",
+        tts_model="",                # voice_id 替代 model 概念
         video_provider_label="heygen",
-        video_model="heygen-avatar-v3",
+        video_model="v2",            # API schema 版本,不是 model id
         required_env=["HEYGEN_API_KEY"],
-        notes="待接入 skills/third-party/heygen-skills",
+        notes="V2 API · 真人 lip-sync。需先用 `voices list` / `avatars list` 拿 ID。"
+              "本账号实测:1281 avatars + 5469 talking_photos + 2414 voices",
+        # 默认值:中文女声 Xiaoxin Professional + Veronica talking_photo
+        voice_id="de6ad44022104ac0872392d1139e9364",          # Xiaoxin - Professional
+        talking_photo_id="6013fc758b5446a2ba17d8c459538bb4",  # Veronica(经典口播形象)
+        avatar_id=None,                                       # 留给 user 在管台选
+    ),
+    "kling": VideoProvider(
+        id="kling",
+        display_name="Kling AI(可灵)",
+        # 已启用:本地等价实现 + 管台 Secrets 已落盘 KLING_ACCESS_KEY_ID/SECRET_ACCESS_KEY(2026-05-19)
+        # 后续可选 openclaw doctor --fix + skills install klingai-dev/klingai 用官方包覆盖
+        implemented=True,
+        # TTS 复用 MiniMax(Kling 平台本身只生视频,不出语音)
+        tts_skill="minimax-tts",
+        video_skill="klingai",
+        tts_provider_label="minimax",
+        tts_model="speech-2.8-hd",
+        video_provider_label="kling",
+        video_model="kling-v3",
+        required_env=["KLING_ACCESS_KEY_ID", "KLING_SECRET_ACCESS_KEY"],
+        notes="国内可灵 AI · ABI 对齐 clawhub klingai-dev/klingai。TTS 复用 MiniMax(Kling 不出语音)",
+        available_video_models=[
+            "kling-v3",
+            "kling-v3-omni",
+            "kling-v2-6",
+            "kling-video-o1",
+        ],
+        available_tts_models=[
+            "speech-2.8-hd", "speech-2.6",
+            "speech-02-hd", "speech-02-turbo",
+        ],
     ),
     "self-hosted-sadtalker": VideoProvider(
         id="self-hosted-sadtalker",
@@ -171,18 +209,25 @@ def get_provider(provider_id: str | None) -> VideoProvider:
 
 
 def resolve_from_openclaw_json(openclaw_json: Path) -> VideoProvider:
-    """读管台已落盘的 openclaw.json,挑出当前 video provider(model 也按用户配置覆盖)."""
+    """读管台已落盘的 openclaw.json,挑出当前 video provider(model / avatar / voice 都按用户配置覆盖)."""
     try:
         if openclaw_json.exists():
             j = json.loads(openclaw_json.read_text(encoding="utf-8"))
             v = j.get("video") or {}
             provider = get_provider(v.get("provider"))
-            # 如果 openclaw.json 给了 video.model,覆盖 provider 的默认 — 让用户在管台改了立即生效
+            # 用 dataclass replace 而不是原地改,避免污染 REGISTRY 单例
+            from dataclasses import replace
+            overrides: dict[str, str] = {}
             user_model = v.get("model")
-            if user_model and provider.id == "minimax":
-                # 用 dataclass replace 而不是原地改,避免污染 REGISTRY 单例
-                from dataclasses import replace
-                provider = replace(provider, video_model=user_model)
+            if user_model and provider.id in {"minimax", "kling"}:
+                overrides["video_model"] = user_model
+            # Avatar 类 provider:HeyGen 等通用字段
+            if provider.id in {"heygen"}:
+                if v.get("avatar_id"):         overrides["avatar_id"] = v["avatar_id"]
+                if v.get("voice_id"):          overrides["voice_id"] = v["voice_id"]
+                if v.get("talking_photo_id"):  overrides["talking_photo_id"] = v["talking_photo_id"]
+            if overrides:
+                provider = replace(provider, **overrides)
             return provider
     except Exception:  # noqa: BLE001
         pass
@@ -225,6 +270,43 @@ def build_prompt_for_provider(
             tts_model=provider.tts_model,
             video_provider_label=provider.video_provider_label,
         )
+    if provider.id == "kling":
+        # 简单从受众/风格推 prompt 子串,让 agent 写的 prompt 更具体
+        audience_role = {
+            "直属领导": "女性", "团队内部": "女性",
+            "跨部门": "女性", "客户": "女性",
+        }.get(audience, "女性")
+        style_dress = {
+            "简洁正式": "深色现代职业装",
+            "成果突出": "白衬衫加西装外套",
+            "问题导向": "简约浅灰职业装",
+            "述职风":   "正装深色西装",
+        }.get(style, "现代职业装")
+        return _KLING_TEMPLATE.format(
+            task_id=task_id, duration=duration, audience=audience, style=style,
+            audience_role=audience_role, style_dress=style_dress,
+            script_head=script[:1200],
+            narrations_json=narrations_json, narrations_count=narrations_count,
+            video_model=provider.video_model,
+            tts_model=provider.tts_model,
+            video_provider_label=provider.video_provider_label,
+        )
+    if provider.id == "heygen":
+        # HeyGen 一个 skill 把 video + TTS 都接管,prompt 单独处理
+        # 优先 talking_photo(本账号 5469 个,主推路径),其次 avatar(1281 个)
+        character_arg = (
+            f'--talking_photo_id "{provider.talking_photo_id}"'
+            if provider.talking_photo_id and not provider.avatar_id
+            else f'--avatar_id "{provider.avatar_id}"'
+        )
+        return _HEYGEN_TEMPLATE.format(
+            task_id=task_id, duration=duration, audience=audience, style=style,
+            script_head=script[:1200], slides_json=slides_json,
+            narrations_json=narrations_json, narrations_count=narrations_count,
+            character_arg=character_arg,
+            voice_id=provider.voice_id or "",
+            video_provider_label=provider.video_provider_label,
+        )
     # 其它已声明但未接好的 provider — 让 agent 直接产降级 JSON,不去尝试调 skill
     return _STUB_TEMPLATE.format(
         task_id=task_id, audience=audience, style=style,
@@ -240,6 +322,14 @@ def build_prompt_for_provider(
 
 
 _MINIMAX_TEMPLATE = """请用挂载的 minimax-tts 和 minimax-video 两个 skill 制作汇报视频物料。
+
+# 重要前置 · 必读
+本环境必须走 **mmx CLI**(已 `mmx auth login` 配置 API key,见 ~/.config/mmx/config.json)。
+- 你**不能**自己判断 "MINIMAX_API_KEY 是否设置",**不能**预判降级 — 必须先真正调脚本。
+- 两个 skill scripts 内部都是 **mmx CLI 优先**(独立 auth,不读 MINIMAX_API_KEY)+ HTTP 兜底。
+  即使你看到 env 里 MINIMAX_API_KEY 是空,**也要先调脚本** — mmx CLI 走自己的 config.json。
+- 脚本 stdout 会有 `"via": "mmx"` 或 `"via": "http"` 字段,告诉你实际走了哪条腿。
+- 只有当 `via=mmx` 也 `ok=false`(mmx_quota_exhausted / mmx_nonzero / mmx_timeout)时,才算真的失败。
 
 # 当前任务
 task_id: {task_id}
@@ -265,8 +355,10 @@ style:     {style}
 # 你要做的 — 两条腿并行
 ## (A) TTS 配音 · minimax-tts
 按 narrations / slides 切讲稿,逐段调 `.agents/skills/minimax-tts/scripts/synthesize.py` 生成 mp3。
+- **必须真调脚本,不要预判降级**。脚本内部走 mmx CLI(独立 auth 不依赖 env)。
 - 每段 mp3 → `data/outputs/{task_id}/audio/<两位序号>.mp3`
 - 元数据写 jsonl,调 build_srt.py 生成 subtitles.srt
+- 留意 stdout 的 `via` 字段:`mmx` 走 plan 配额(speech-hd interval 4000),`http` 走 PAYG。
 
 ## (B) 数字人开场镜头 · minimax-video
 调一次 `.agents/skills/minimax-video/scripts/generate.py` 生成 6 秒数字人开场。
@@ -286,11 +378,13 @@ python3 .agents/skills/minimax-video/scripts/generate.py \\
   --output data/outputs/{task_id}/video/intro.mp4
 ```
 
-# 失败处理
-- `MINIMAX_API_KEY` 缺失 → degraded=true / no_api_key
-- API quota_exhausted → 已生成部分保留,degraded=true / quota_exhausted
+# 失败处理(只有真调脚本拿到 ok=false 才能算失败)
+- 脚本输出 `via=mmx, ok=false, error=mmx_quota_exhausted` → degraded=true / quota_exhausted
+- 脚本输出 `via=mmx, ok=false, error=mmx_nonzero` → 看 stderr 决定 degrade_reason
+- 脚本输出 `via=http, ok=false, error=no_api_key` → 这才是真 no_api_key,degraded=true
 - 视频失败但 TTS 成功 → 保留 audio_segments,intro_video=null,不阻塞
-- 两个都失败 → degraded=true 让 pipeline 走降级
+- 两个都失败 → degraded=true 让 pipeline 走 slideshow 降级
+- **禁止行为**:看到 env 没 key 就直接写 "no_api_key",不调脚本。这是错的 — 必须真调。
 
 # 输出 schema(最终一段 ```json``` 代码块)
 {{
@@ -311,6 +405,189 @@ python3 .agents/skills/minimax-video/scripts/generate.py \\
 
 # 重要:最终回复硬约束
 不管 skill 调用结果如何(成功 / quota 耗尽 / 网络失败),你的最终回复**必须**以一段 ```json``` 代码块结尾,包含上面 schema 的所有字段。失败的段把 ok=false、degraded=true、degrade_reason 填准即可。不要把脚本 stdout 当成回复贴出来,自己整合后写 JSON。"""
+
+
+_KLING_TEMPLATE = """请用挂载的 klingai skill 生成**两段独立**数字人短镜头:开场 + 结尾(各 5s,Kling 单段上限)。
+
+# 当前任务
+task_id: {task_id}
+video_dir: data/outputs/{task_id}/video/
+duration:  {duration}
+audience:  {audience}
+style:     {style}
+
+# 讲稿(script_md)
+{script_head}
+
+# Narrations(参考,中间页 narrations 旁白会由 backend 用 MiniMax-TTS 兜底,**不要你管**)
+```json
+{narrations_json}
+```
+
+# 你要做的 — 两段独立 5s 镜头
+
+## 共同前置
+- **所有 Kling 调用走 klingai skill**(不要自拼 HTTP,JWT 在 skill 内部签)
+- 用 model `{video_model}` + mode `pro` + aspect_ratio `16:9` + duration `5`
+- 注意 prompt 描述场景但**不强调嘴部特写**(Kling 不知道讲什么话,嘴动会跟旁白对不上;让数字人是"自然站立讲话"的中景,嘴部不显眼)
+- 鉴权走 env KLING_ACCESS_KEY_ID / KLING_SECRET_ACCESS_KEY(backend 已注入)
+- API base 走 env KLING_API_BASE(默认 https://api-beijing.klingai.com)
+
+## (A) 开场镜头 intro_video
+取 narrations[0] 文本,精简到 **15-25 字开场白**(必须能在 5s 配音念完,不要长)。
+
+```bash
+node .agents/skills/klingai/scripts/kling.mjs video \\
+  --prompt "中国年轻职场{audience_role},身穿{style_dress},坐在干净明亮的现代会议室中景,自然微笑温暖地讲话,正面对镜头" \\
+  --model "{video_model}" --mode pro --aspect_ratio 16:9 --duration 5 \\
+  --output_dir data/outputs/{task_id}/video
+```
+
+拿到 stdout `path` 后立刻:
+```bash
+mv "<返回的 path>" data/outputs/{task_id}/video/intro.mp4
+```
+
+## (B) 结尾镜头 outro_video
+取 narrations[-1] 文本,精简到 **15-25 字总结**。同样调 kling.mjs video(prompt 可以稍微改 — 比如"站起身平视镜头自信收尾"),拿到后:
+```bash
+mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
+```
+
+# 重要原则
+- **两段视频是必需品**,缺一个都不行
+- 每段恰好 5s — Kling 这个 model 单段就 5s,不要尝试 --duration 10(会被 SKILL 拒)
+- 视频是**无音**的,数字人嘴动跟 backend 配音不严格对口型(prompt 用中景避开特写嘴部即可)
+- 中间页 narration / TTS 你**不需要管**,backend 自己用 MiniMax-TTS 兜
+- **不要并行调 minimax-tts**(全部 audio 由 backend 处理,包括 intro/outro 文本)
+
+# 不要做的事
+- 不要换 model(`{video_model}` 已经 allowed)
+- 不要在 video 提交时同时传 `--task_id`(查询模式与提交模式互斥)
+- 不要打印 KLING_ACCESS_KEY_ID / SECRET_ACCESS_KEY / KLING_TOKEN
+
+# 失败处理(exit code)
+- exit 2(no_credentials)→ degraded=true / degrade_reason=no_credentials
+- exit 3(quota_exhausted)→ degraded=true / degrade_reason=quota_exhausted
+- exit 4(timeout)→ degraded=true / degrade_reason=timeout
+- intro 成功 outro 失败 → 把成功那段写进 schema,degraded=true / degrade_reason=outro_missing
+
+# 输出 schema(最终一段 ```json``` 代码块)
+{{
+  "audio_segments": [],
+  "subtitle_path": null,
+  "intro_video": {{"path": "data/outputs/{task_id}/video/intro.mp4",
+    "duration": 5,
+    "text": "<本次给 intro 设定的 15-25 字开场白文本,backend 用它跑 TTS 拼配音>",
+    "ok": true}},
+  "outro_video": {{"path": "data/outputs/{task_id}/video/outro.mp4",
+    "duration": 5,
+    "text": "<本次给 outro 设定的 15-25 字结尾总结,backend 用它跑 TTS 拼配音>",
+    "ok": true}},
+  "voice_style": "{style}",
+  "tts_provider": "minimax",
+  "tts_model": "{tts_model}",
+  "video_provider": "{video_provider_label}",
+  "video_model": "{video_model}",
+  "degraded": false,
+  "degrade_reason": null
+}}
+
+# 重要:最终回复硬约束
+最终回复必须以一段 ```json``` 代码块结尾,字段完整。**intro_video.text / outro_video.text 不能省**(backend 拿这个跑配音,直接决定数字人镜头有没有声)。任一段失败 → ok=false / path=null / degraded=true / degrade_reason 填准。"""
+
+
+_HEYGEN_TEMPLATE = """请用挂载的 heygen skill 生成**两段独立**数字人视频:开场白 + 结尾总结。
+
+# 当前任务
+task_id: {task_id}
+video_dir: data/outputs/{task_id}/video/
+duration:  {duration}
+audience:  {audience}
+style:     {style}
+
+# 讲稿(script_md,完整文本)
+{script_head}
+
+# Slides(参考语境 · 不直接喂 HeyGen)
+```json
+{slides_json}
+```
+
+# Narrations(上游 narrations · 中间页旁白会由 backend 用 MiniMax-TTS 兜底,**不要你管**)
+```json
+{narrations_json}
+```
+
+# 你要做的 — 两段独立短镜头(各 15-30s)
+
+## (A) 开场白 intro_video
+取 narrations[0] 文本(汇报封面的开场话术,如标题 + 主旨)。如果该段超过 200 字,**自行精简到 80-120 字**,保持开场气势。然后:
+
+```bash
+node .agents/skills/heygen/scripts/heygen.mjs video generate \\
+  {character_arg} \\
+  --voice_id "{voice_id}" \\
+  --text "<精简后的开场白,80-120 字,以问候/亮明主题开头>" \\
+  --emotion "Friendly" \\
+  --speed 1.0 \\
+  --background_color "#FFFFFF" \\
+  --width 1920 --height 1080 \\
+  --output_dir data/outputs/{task_id}/video
+```
+
+拿到 stdout 的 `path` 字段后立刻:
+```bash
+mv "<返回的 path>" data/outputs/{task_id}/video/intro.mp4
+```
+
+## (B) 结尾总结 outro_video
+取 narrations[-1] 文本(汇报末页的总结/展望)。同样精简到 80-120 字,然后**再调一次** heygen skill,**output_dir 同上**,拿到后:
+```bash
+mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
+```
+
+# 重要原则
+- **两段视频是必需品**,缺一个都不行(intro / outro 任一失败 → degraded=true)
+- character_arg 由后端注入(talking_photo / avatar);**不要自己换 ID**
+- voice_id 后端给的是中文女声 Xiaoxin(`de6ad44...`);想换在管台 Config 改
+- 每段 80-120 字,HeyGen 渲染约 15-25 秒,两段加起来 ≤ 60 秒
+- 中间页 narration 由 backend 自动跑 MiniMax-TTS 兜底,**你不需要调 minimax-tts**
+
+# 不要做的事
+- 不要把整个讲稿(--text 几千字)塞一段视频里(会卡 quota / 时长超控)
+- 不要去调 minimax-tts(中间页 backend 兜)
+- 不要打印 HEYGEN_API_KEY
+- 不要尝试改 avatar_style / use_avatar_iv,默认行为已经稳
+
+# 失败处理(exit code)
+- exit 2(no_credentials)→ degraded=true / degrade_reason=no_credentials
+- exit 3(quota_exhausted)→ degraded=true / degrade_reason=quota_exhausted
+- exit 4(timeout)→ degraded=true / degrade_reason=timeout
+- exit 1 → degraded=true / degrade_reason=heygen_<code>
+- intro 成功 outro 失败(或反之)→ 把成功那段写进 schema,degraded=true / degrade_reason=outro_missing(或 intro_missing)
+
+# 输出 schema(最终一段 ```json``` 代码块)
+{{
+  "audio_segments": [],
+  "subtitle_path": null,
+  "intro_video": {{"path": "data/outputs/{task_id}/video/intro.mp4",
+    "duration": <intro 实际秒数,从 skill 返回的 duration 字段>,
+    "text": "<本次喂 intro 的精简稿,完整保留>", "ok": true}},
+  "outro_video": {{"path": "data/outputs/{task_id}/video/outro.mp4",
+    "duration": <outro 实际秒数>,
+    "text": "<本次喂 outro 的精简稿,完整保留>", "ok": true}},
+  "voice_style": "{style}",
+  "tts_provider": "heygen-builtin",
+  "tts_model": "{voice_id}",
+  "video_provider": "{video_provider_label}",
+  "video_model": "v2",
+  "degraded": false,
+  "degrade_reason": null
+}}
+
+# 重要:最终回复硬约束
+最终回复必须以一段 ```json``` 代码块结尾,字段完整。任一段失败:把那段填 ok=false / path=null,degraded=true / degrade_reason 填准。"""
 
 
 _NONE_TEMPLATE = """当前 video provider 已切换到「仅字幕」模式 — 不要调用任何外部 TTS / 视频 API。

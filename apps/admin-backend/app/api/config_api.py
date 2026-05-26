@@ -25,10 +25,10 @@ router = APIRouter(prefix="/config", tags=["config"])
 OC_JSON = settings.openclaw_json
 
 
-LLM_PROVIDERS = ["anthropic", "minimax", "qwen", "glm", "openai"]
+LLM_PROVIDERS = ["anthropic", "minimax", "qwen", "glm", "openai", "deepseek"]
 TTS_PROVIDERS = ["minimax", "heygen-builtin", "elevenlabs", "qwen3", "huihuibao"]
 # 与 web-backend/app/video/providers.py 的 REGISTRY 对齐
-VIDEO_PROVIDERS = ["minimax", "heygen", "self-hosted-sadtalker", "none"]
+VIDEO_PROVIDERS = ["minimax", "heygen", "kling", "self-hosted-sadtalker", "none"]
 
 VIDEO_PROVIDER_DETAILS: list[dict] = [
     {"id": "minimax", "display_name": "MiniMax(Hailuo + speech)",
@@ -48,9 +48,30 @@ VIDEO_PROVIDER_DETAILS: list[dict] = [
          "MiniMax-Hailuo-2.3-Fast-6s-768p",
          "MiniMax-Hailuo-2.3-6s-768p",
      ]},
-    {"id": "heygen", "display_name": "HeyGen Avatar",
-     "implemented": False, "required_env": ["HEYGEN_API_KEY"],
-     "notes": "待接入 skills/third-party/heygen-skills"},
+    {"id": "heygen", "display_name": "HeyGen V2(数字人 lip-sync)",
+     "implemented": True, "required_env": ["HEYGEN_API_KEY"],
+     "notes": "真人 lip-sync 数字人。voice_id + avatar_id / talking_photo_id 三选项,先用 skill list 查 ID 再填",
+     # HeyGen 没有传统 model 概念,model 字段填 v2(API schema 版本)
+     "default_video_model": "v2",
+     "available_video_models": ["v2"],
+     # 新增字段:avatar_id / voice_id / talking_photo_id 由管台 Config 填
+     # default 给了一组(Xiaoxin 中文女声 + Veronica talking_photo)
+     "default_voice_id": "de6ad44022104ac0872392d1139e9364",          # Xiaoxin - Professional (Chinese female)
+     "default_talking_photo_id": "6013fc758b5446a2ba17d8c459538bb4",  # Veronica
+     "supports_avatar_id": True,
+     "supports_voice_id": True,
+     "supports_talking_photo_id": True},
+    {"id": "kling", "display_name": "Kling AI(可灵)",
+     "implemented": True,
+     "required_env": ["KLING_ACCESS_KEY_ID", "KLING_SECRET_ACCESS_KEY"],
+     "notes": "ABI 对齐 clawhub klingai-dev/klingai。本地等价实现已就位,可选用 openclaw skills install klingai-dev/klingai 替换为官方包。TTS 复用 MiniMax",
+     "default_video_model": "kling-v3",
+     "available_video_models": [
+         "kling-v3",
+         "kling-v3-omni",
+         "kling-v2-6",
+         "kling-video-o1",
+     ]},
     {"id": "self-hosted-sadtalker", "display_name": "自托管 SadTalker",
      "implemented": False, "required_env": [],
      "notes": "待接入 claude-code-video-toolkit + SadTalker GPU 节点"},
@@ -65,6 +86,9 @@ MODEL_PRESETS: dict[str, list[str]] = {
     "qwen":      ["qwen3-max", "qwen3-plus", "qwen2.5-72b-instruct"],
     "glm":       ["glm-4.5", "glm-4-plus", "glm-4-air"],
     "openai":    ["gpt-4o", "gpt-4o-mini"],
+    # DeepSeek API 兼容 OpenAI SDK,base_url https://api.deepseek.com
+    # deepseek-chat → V3.2 通用对话(性价比首选);deepseek-reasoner → R1 推理(慢但更稳)
+    "deepseek":  ["deepseek-chat", "deepseek-reasoner"],
 }
 
 TTS_MODEL_PRESETS: dict[str, list[str]] = {
@@ -139,6 +163,11 @@ class ConfigBody(BaseModel):
     tts_model: str | None = None
     video_provider: str | None = None
     video_model: str | None = None
+    # Avatar 类 provider(HeyGen / D-ID 等)的内容 ID 字段 — 跟 video_model 正交
+    # 这些字段为 None 时不写;为 "" 时清除(写到 video.<key>=None 后 .pop)
+    video_avatar_id: str | None = None
+    video_voice_id: str | None = None
+    video_talking_photo_id: str | None = None
     image_provider: str | None = None
     image_model: str | None = None
     image_base_url: str | None = None    # OpenAI 兼容 image endpoint(写到 image.base_url)
@@ -211,12 +240,23 @@ async def write(body: ConfigBody):
         if body.tts_model:
             tts["model"] = body.tts_model
 
-    if body.video_provider or body.video_model:
+    if (body.video_provider or body.video_model or
+        body.video_avatar_id is not None or body.video_voice_id is not None
+        or body.video_talking_photo_id is not None):
         video = j.setdefault("video", {})
         if body.video_provider:
             video["provider"] = body.video_provider
         if body.video_model:
             video["model"] = body.video_model
+        # avatar / voice / talking_photo:空字符串 = 清除(走 default),其它值 = 覆盖
+        for key, val in [("avatar_id", body.video_avatar_id),
+                         ("voice_id", body.video_voice_id),
+                         ("talking_photo_id", body.video_talking_photo_id)]:
+            if val is not None:
+                if val == "":
+                    video.pop(key, None)
+                else:
+                    video[key] = val
 
     if body.image_provider or body.image_model or body.image_base_url is not None:
         image = j.setdefault("image", {})
