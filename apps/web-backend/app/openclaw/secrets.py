@@ -48,6 +48,7 @@ AGENT_ENV_MAP: dict[str, list[tuple[str, str]]] = {
         # Kling AI(clawhub klingai-dev/klingai)— AK+SK 拼 JWT 在 skill 本地签
         ("KLING_ACCESS_KEY_ID", "KLING_ACCESS_KEY_ID"),
         ("KLING_SECRET_ACCESS_KEY", "KLING_SECRET_ACCESS_KEY"),
+        ("DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY"),
     ],
     "copywriter": [],
     # html-designer 的 OpenAI 凭据走 secrets,base_url/model 走 openclaw.json image.* 节点

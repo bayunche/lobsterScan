@@ -235,14 +235,14 @@ class Coordinator:
         self.max_hops = max_hops
         self._chat = chat_publisher  # 用于在 chat 里出 "→ 转交给 X" 气泡
 
-    def _disp(self, agent_id: str) -> str:
-        """agent_id → 中文显示名;缺映射时 fallback 到通用业务化称呼,**绝不暴露 raw id**。"""
-        return self.agent_display.get(agent_id) or "同事"
-
         state.bus.on("agent.handoff", self.on_handoff)
         state.bus.on("agent.failed", self.on_failed)
         state.bus.on("agent.needs_help", self.on_needs_help)
         state.bus.on("agent.needs_retry", self.on_needs_retry)
+
+    def _disp(self, agent_id: str) -> str:
+        """agent_id → 中文显示名;缺映射时 fallback 到通用业务化称呼,**绝不暴露 raw id**。"""
+        return self.agent_display.get(agent_id) or "同事"
 
     # ── 终止 ──
     def _end(self, reason: str) -> None:
@@ -316,6 +316,18 @@ class Coordinator:
                 self._end("revisit_limit")
                 return
             target = target2
+
+        # 必经步骤保护:agent 不能跳过 default_next_step 链上的关键步骤
+        if from_step and target != "DONE":
+            expected = self.default_next_step.get(from_step)
+            if expected and expected != target and self.state.visited.get(expected, 0) == 0:
+                skipped_disp = self._disp(self.step_to_agent.get(expected, ""))
+                target_disp = self._disp(self.step_to_agent.get(target, ""))
+                await self._announce(
+                    f"💡 {from_agent_disp} 想跳到 {target_disp},但 {skipped_disp} 还没跑过,不能跳。"
+                    f"按流程先给 {skipped_disp}。"
+                )
+                target = expected
 
         # 转交气泡 — 由"上一位"发声(用显示名,不暴露 agent_id)
         if self._chat is not None:

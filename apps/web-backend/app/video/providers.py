@@ -117,6 +117,26 @@ REGISTRY: dict[str, VideoProvider] = {
             "speech-02-hd", "speech-02-turbo",
         ],
     ),
+    "dashscope": VideoProvider(
+        id="dashscope",
+        display_name="万相 2.7(阿里 DashScope)",
+        implemented=True,
+        tts_skill="minimax-tts",
+        video_skill="dashscope-video",
+        tts_provider_label="minimax",
+        tts_model="speech-2.8-hd",
+        video_provider_label="dashscope",
+        video_model="wan2.7-t2v-2026-04-25",
+        required_env=["DASHSCOPE_API_KEY"],
+        notes="阿里百炼 DashScope · 万相 2.7 文生视频,TTS 复用 MiniMax",
+        available_video_models=[
+            "wan2.7-t2v-2026-04-25",
+        ],
+        available_tts_models=[
+            "speech-2.8-hd", "speech-2.6",
+            "speech-02-hd", "speech-02-turbo",
+        ],
+    ),
     "self-hosted-sadtalker": VideoProvider(
         id="self-hosted-sadtalker",
         display_name="自托管 SadTalker(占位)",
@@ -307,6 +327,26 @@ def build_prompt_for_provider(
             voice_id=provider.voice_id or "",
             video_provider_label=provider.video_provider_label,
         )
+    if provider.id == "dashscope":
+        audience_role = {
+            "直属领导": "女性", "团队内部": "女性",
+            "跨部门": "女性", "客户": "女性",
+        }.get(audience, "女性")
+        style_dress = {
+            "简洁正式": "深色现代职业装",
+            "成果突出": "白衬衫加西装外套",
+            "问题导向": "简约浅灰职业装",
+            "述职风":   "正装深色西装",
+        }.get(style, "现代职业装")
+        return _DASHSCOPE_TEMPLATE.format(
+            task_id=task_id, duration=duration, audience=audience, style=style,
+            audience_role=audience_role, style_dress=style_dress,
+            script_head=script[:1200],
+            narrations_json=narrations_json, narrations_count=narrations_count,
+            video_model=provider.video_model,
+            tts_model=provider.tts_model,
+            video_provider_label=provider.video_provider_label,
+        )
     # 其它已声明但未接好的 provider — 让 agent 直接产降级 JSON,不去尝试调 skill
     return _STUB_TEMPLATE.format(
         task_id=task_id, audience=audience, style=style,
@@ -375,7 +415,7 @@ python3 .agents/skills/minimax-video/scripts/generate.py \\
   --prompt "<你定制的 prompt>" \\
   --duration 6 \\
   --model "{video_model}" \\
-  --output data/outputs/{task_id}/video/intro.mp4
+  --output /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4
 ```
 
 # 失败处理(只有真调脚本拿到 ok=false 才能算失败)
@@ -392,7 +432,7 @@ python3 .agents/skills/minimax-video/scripts/generate.py \\
     "path": "data/outputs/{task_id}/audio/01.mp3",
     "duration_estimate_sec": 6.4, "ok": true}}],
   "subtitle_path": "data/outputs/{task_id}/audio/subtitles.srt",
-  "intro_video": {{"path": "data/outputs/{task_id}/video/intro.mp4",
+  "intro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4",
     "duration": 6, "prompt": "...", "ok": true}},
   "voice_style": "{style}",
   "tts_provider": "minimax",
@@ -407,82 +447,75 @@ python3 .agents/skills/minimax-video/scripts/generate.py \\
 不管 skill 调用结果如何(成功 / quota 耗尽 / 网络失败),你的最终回复**必须**以一段 ```json``` 代码块结尾,包含上面 schema 的所有字段。失败的段把 ok=false、degraded=true、degrade_reason 填准即可。不要把脚本 stdout 当成回复贴出来,自己整合后写 JSON。"""
 
 
-_KLING_TEMPLATE = """请用挂载的 klingai skill 生成**两段独立**数字人短镜头:开场 + 结尾(各 5s,Kling 单段上限)。
+_KLING_TEMPLATE = """# 数字人 Provider:Kling AI(可灵)
+本次任务已为你挂载 **klingai** skill,你必须用它生成两段数字人短视频。
 
-# 当前任务
+## 当前任务
 task_id: {task_id}
 video_dir: data/outputs/{task_id}/video/
-duration:  {duration}
 audience:  {audience}
 style:     {style}
 
-# 讲稿(script_md)
+## 讲稿参考
 {script_head}
 
-# Narrations(参考,中间页 narrations 旁白会由 backend 用 MiniMax-TTS 兜底,**不要你管**)
+## Narrations({narrations_count} 段)
 ```json
 {narrations_json}
 ```
 
-# 你要做的 — 两段独立 5s 镜头
+## 你必须做的 — 两段 5s 数字人视频
 
-## 共同前置
-- **所有 Kling 调用走 klingai skill**(不要自拼 HTTP,JWT 在 skill 内部签)
-- 用 model `{video_model}` + mode `pro` + aspect_ratio `16:9` + duration `5`
-- 注意 prompt 描述场景但**不强调嘴部特写**(Kling 不知道讲什么话,嘴动会跟旁白对不上;让数字人是"自然站立讲话"的中景,嘴部不显眼)
-- 鉴权走 env KLING_ACCESS_KEY_ID / KLING_SECRET_ACCESS_KEY(backend 已注入)
-- API base 走 env KLING_API_BASE(默认 https://api-beijing.klingai.com)
+### Step 1: 先验证凭据
+```bash
+node .agents/skills/klingai/scripts/kling.mjs account --check
+```
+确认 `ok: true` 再继续。如果失败 → 直接输出 degraded JSON,不要编造视频文件。
 
-## (A) 开场镜头 intro_video
-取 narrations[0] 文本,精简到 **15-25 字开场白**(必须能在 5s 配音念完,不要长)。
-
+### Step 2: 生成开场镜头 (intro_video)
+取 narrations[0] 文本,精简到 15-25 字开场白。然后**真正执行**:
 ```bash
 node .agents/skills/klingai/scripts/kling.mjs video \\
   --prompt "中国年轻职场{audience_role},身穿{style_dress},坐在干净明亮的现代会议室中景,自然微笑温暖地讲话,正面对镜头" \\
   --model "{video_model}" --mode pro --aspect_ratio 16:9 --duration 5 \\
-  --output_dir data/outputs/{task_id}/video
+  --output_dir /mnt/c/code/lobsterScan/data/outputs/{task_id}/video
 ```
-
-拿到 stdout `path` 后立刻:
+等待 stdout 返回 JSON(内含 `path` 字段,轮询约 1-3 分钟),然后:
 ```bash
-mv "<返回的 path>" data/outputs/{task_id}/video/intro.mp4
+mv "<stdout 返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4
 ```
 
-## (B) 结尾镜头 outro_video
-取 narrations[-1] 文本,精简到 **15-25 字总结**。同样调 kling.mjs video(prompt 可以稍微改 — 比如"站起身平视镜头自信收尾"),拿到后:
+### Step 3: 生成结尾镜头 (outro_video)
+取 narrations[-1] 文本,精简到 15-25 字。同样执行 kling.mjs video(prompt 可稍改,如"站起身平视镜头自信收尾"),拿到后:
 ```bash
-mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
+mv "<stdout 返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4
 ```
 
-# 重要原则
-- **两段视频是必需品**,缺一个都不行
-- 每段恰好 5s — Kling 这个 model 单段就 5s,不要尝试 --duration 10(会被 SKILL 拒)
-- 视频是**无音**的,数字人嘴动跟 backend 配音不严格对口型(prompt 用中景避开特写嘴部即可)
-- 中间页 narration / TTS 你**不需要管**,backend 自己用 MiniMax-TTS 兜
-- **不要并行调 minimax-tts**(全部 audio 由 backend 处理,包括 intro/outro 文本)
+## 关键规则
+- **必须真正运行 Bash 命令**。不要跳过执行直接编写输出 JSON — backend 会验证文件是否存在
+- 每段 5s(Kling 单段上限),model 用 `{video_model}`,不要换
+- 视频无音(数字人嘴动不对口型没关系,用中景避开特写嘴部)
+- TTS / 录屏你不需要管,backend 自动处理
+- 鉴权已由 backend 注入 env: KLING_ACCESS_KEY_ID / KLING_SECRET_ACCESS_KEY
 
-# 不要做的事
-- 不要换 model(`{video_model}` 已经 allowed)
-- 不要在 video 提交时同时传 `--task_id`(查询模式与提交模式互斥)
-- 不要打印 KLING_ACCESS_KEY_ID / SECRET_ACCESS_KEY / KLING_TOKEN
+## 失败处理
+kling.mjs 返回 `ok: false` 或非零退出码时:
+- exit 2 → degrade_reason: "no_credentials"
+- exit 3 → degrade_reason: "quota_exhausted"
+- exit 4 → degrade_reason: "timeout"
+- intro 成功 outro 失败 → 保留成功的,degraded: true
 
-# 失败处理(exit code)
-- exit 2(no_credentials)→ degraded=true / degrade_reason=no_credentials
-- exit 3(quota_exhausted)→ degraded=true / degrade_reason=quota_exhausted
-- exit 4(timeout)→ degraded=true / degrade_reason=timeout
-- intro 成功 outro 失败 → 把成功那段写进 schema,degraded=true / degrade_reason=outro_missing
-
-# 输出 schema(最终一段 ```json``` 代码块)
+## 输出 schema(最终一段 ```json``` 代码块)
 {{
   "audio_segments": [],
   "subtitle_path": null,
-  "intro_video": {{"path": "data/outputs/{task_id}/video/intro.mp4",
+  "intro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4",
     "duration": 5,
-    "text": "<本次给 intro 设定的 15-25 字开场白文本,backend 用它跑 TTS 拼配音>",
+    "text": "<15-25 字开场白,backend 用它跑 TTS 配音>",
     "ok": true}},
-  "outro_video": {{"path": "data/outputs/{task_id}/video/outro.mp4",
+  "outro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4",
     "duration": 5,
-    "text": "<本次给 outro 设定的 15-25 字结尾总结,backend 用它跑 TTS 拼配音>",
+    "text": "<15-25 字结尾总结,backend 用它跑 TTS 配音>",
     "ok": true}},
   "voice_style": "{style}",
   "tts_provider": "minimax",
@@ -493,8 +526,8 @@ mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
   "degrade_reason": null
 }}
 
-# 重要:最终回复硬约束
-最终回复必须以一段 ```json``` 代码块结尾,字段完整。**intro_video.text / outro_video.text 不能省**(backend 拿这个跑配音,直接决定数字人镜头有没有声)。任一段失败 → ok=false / path=null / degraded=true / degrade_reason 填准。"""
+**intro_video.text / outro_video.text 不能省**(backend 拿它跑配音)。
+任一段失败 → 该段 ok=false / path=null,整体 degraded=true + degrade_reason 填准。"""
 
 
 _HEYGEN_TEMPLATE = """请用挂载的 heygen skill 生成**两段独立**数字人视频:开场白 + 结尾总结。
@@ -533,18 +566,18 @@ node .agents/skills/heygen/scripts/heygen.mjs video generate \\
   --speed 1.0 \\
   --background_color "#FFFFFF" \\
   --width 1920 --height 1080 \\
-  --output_dir data/outputs/{task_id}/video
+  --output_dir /mnt/c/code/lobsterScan/data/outputs/{task_id}/video
 ```
 
 拿到 stdout 的 `path` 字段后立刻:
 ```bash
-mv "<返回的 path>" data/outputs/{task_id}/video/intro.mp4
+mv "<返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4
 ```
 
 ## (B) 结尾总结 outro_video
 取 narrations[-1] 文本(汇报末页的总结/展望)。同样精简到 80-120 字,然后**再调一次** heygen skill,**output_dir 同上**,拿到后:
 ```bash
-mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
+mv "<返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4
 ```
 
 # 重要原则
@@ -571,10 +604,10 @@ mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
 {{
   "audio_segments": [],
   "subtitle_path": null,
-  "intro_video": {{"path": "data/outputs/{task_id}/video/intro.mp4",
+  "intro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4",
     "duration": <intro 实际秒数,从 skill 返回的 duration 字段>,
     "text": "<本次喂 intro 的精简稿,完整保留>", "ok": true}},
-  "outro_video": {{"path": "data/outputs/{task_id}/video/outro.mp4",
+  "outro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4",
     "duration": <outro 实际秒数>,
     "text": "<本次喂 outro 的精简稿,完整保留>", "ok": true}},
   "voice_style": "{style}",
@@ -588,6 +621,88 @@ mv "<返回的 path>" data/outputs/{task_id}/video/outro.mp4
 
 # 重要:最终回复硬约束
 最终回复必须以一段 ```json``` 代码块结尾,字段完整。任一段失败:把那段填 ok=false / path=null,degraded=true / degrade_reason 填准。"""
+
+
+_DASHSCOPE_TEMPLATE = """# 数字人 Provider:万相 2.7(阿里 DashScope)
+本次任务已为你挂载 **dashscope-video** skill,你必须用它生成两段数字人短视频。
+
+## 当前任务
+task_id: {task_id}
+video_dir: data/outputs/{task_id}/video/
+audience:  {audience}
+style:     {style}
+
+## 讲稿参考
+{script_head}
+
+## Narrations({narrations_count} 段)
+```json
+{narrations_json}
+```
+
+## 你必须做的 — 两段 5s 数字人视频
+
+### Step 1: 先验证凭据
+```bash
+python3 .agents/skills/dashscope-video/scripts/dashscope_video.py --check
+```
+确认 `ok: true` 再继续。如果失败 → 直接输出 degraded JSON,不要编造视频文件。
+
+### Step 2: 生成开场镜头 (intro_video)
+取 narrations[0] 文本,精简到 15-25 字开场白。然后**真正执行**:
+```bash
+python3 .agents/skills/dashscope-video/scripts/dashscope_video.py \\
+  --prompt "中国年轻职场{audience_role},身穿{style_dress},坐在干净明亮的现代会议室中景,自然微笑温暖地讲话,正面对镜头" \\
+  --model {video_model} --duration 5 --resolution 720P --ratio 16:9 \\
+  --output_dir /mnt/c/code/lobsterScan/data/outputs/{task_id}/video
+```
+等待 stdout 返回 JSON(内含 `path` 字段,轮询约 1-5 分钟),然后:
+```bash
+mv "<stdout 返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4
+```
+
+### Step 3: 生成结尾镜头 (outro_video)
+取 narrations[-1] 文本,精简到 15-25 字。同样执行脚本(prompt 可稍改,如"站起身平视镜头自信收尾"),拿到后:
+```bash
+mv "<stdout 返回的 path>" /mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4
+```
+
+## 关键规则
+- **必须真正运行 Bash 命令**。不要跳过执行直接编写输出 JSON — backend 会验证文件是否存在
+- 每段 5s,model 用 `{video_model}`,不要换
+- 视频无音(数字人嘴动不对口型没关系,用中景避开特写嘴部)
+- TTS / 录屏你不需要管,backend 自动处理
+- 鉴权已由 backend 注入 env: DASHSCOPE_API_KEY
+
+## 失败处理
+脚本返回 `ok: false` 或非零退出码时:
+- exit 2 → degrade_reason: "no_credentials"
+- exit 4 → degrade_reason: "timeout"
+- intro 成功 outro 失败 → 保留成功的,degraded: true
+
+## 输出 schema(最终一段 ```json``` 代码块)
+{{
+  "audio_segments": [],
+  "subtitle_path": null,
+  "intro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/intro.mp4",
+    "duration": 5,
+    "text": "<15-25 字开场白,backend 用它跑 TTS 配音>",
+    "ok": true}},
+  "outro_video": {{"path": "/mnt/c/code/lobsterScan/data/outputs/{task_id}/video/outro.mp4",
+    "duration": 5,
+    "text": "<15-25 字结尾总结,backend 用它跑 TTS 配音>",
+    "ok": true}},
+  "voice_style": "{style}",
+  "tts_provider": "minimax",
+  "tts_model": "{tts_model}",
+  "video_provider": "{video_provider_label}",
+  "video_model": "{video_model}",
+  "degraded": false,
+  "degrade_reason": null
+}}
+
+**intro_video.text / outro_video.text 不能省**(backend 拿它跑配音)。
+任一段失败 → 该段 ok=false / path=null,整体 degraded=true + degrade_reason 填准。"""
 
 
 _NONE_TEMPLATE = """当前 video provider 已切换到「仅字幕」模式 — 不要调用任何外部 TTS / 视频 API。

@@ -79,7 +79,7 @@
     }
   ],
   "providers": {
-    "default": "minimax",
+    "default": "deepseek",
     "anthropic": {
       "model": "claude-sonnet-4-6",
       "opus": "claude-opus-4-7"
@@ -91,7 +91,7 @@
     "qwen": {},
     "glm": {},
     "deepseek": {
-      "model": "deepseek-chat",
+      "model": "deepseek-v4-flash",
       "base_url": "https://api.deepseek.com"
     }
   },
@@ -100,9 +100,9 @@
     "model": "speech-2.8-hd"
   },
   "video": {
-    "provider": "kling",
-    "model": "kling-v3",
-    "$comment": "国内可灵开放平台。base 走 api-beijing.klingai.com(kling.mjs 默认),AK/SK 在管台 Secrets。单段 5s 无音,backend 跑 MiniMax-TTS 配音并在 broadcast.html avatar 页 video+audio 叠播"
+    "provider": "dashscope",
+    "model": "wan2.7-t2v-2026-04-25",
+    "$comment": "阿里 DashScope 万相 2.7 文生视频。单段 5-10s,backend 跑 MiniMax-TTS 配音"
   },
   "image": {
     "provider": "openai-gpt-image-2",

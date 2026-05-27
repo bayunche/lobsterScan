@@ -47,6 +47,7 @@ _PROVIDER_MODEL_TABLE: dict[str, tuple[str, str]] = {
     "qwen":      ("QWEN_LLM_MODEL",          "qwen3-max"),
     "glm":       ("GLM_LLM_MODEL",           "glm-4-plus"),
     "openai":    ("OPENAI_DEFAULT_MODEL",    "gpt-4.1"),
+    "dashscope": ("DASHSCOPE_DEFAULT_MODEL", "qwen-plus"),
 }
 
 

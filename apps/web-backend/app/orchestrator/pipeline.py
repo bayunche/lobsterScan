@@ -1470,49 +1470,18 @@ ruler 进度尺 + tick 印章替代圆点 + 数字 count-up + 章节段落感。
             narrations_json=json.dumps(narrations, ensure_ascii=False)[:600],
             narrations_count=len(narrations),
         )
-        body = f"""# 主路径 · 浏览器内录屏(broadcast.html)
+        body = f"""# 你的任务:生成数字人视频
 
-上一棒已渲染 **broadcast.html**(`data/outputs/{run.task_id}/web-presentation/broadcast.html`):
-1920×1080 锁屏 · **自动翻页 · inline audio 串联 · 无控件干扰**,专门给录屏用。
-页面暴露 `window.__broadcastReady` 就绪信号 + `window.__broadcastTotalSec` 总时长。
+本次汇报需要数字人出镜。你的**核心交付**是用下面的 provider 生成数字人视频片段。
 
-# 录屏路径优先级(必须按这个顺序试)
+录屏（broadcast.html → mp4）和 TTS 配音由 backend 自动完成,**不需要你操心**。
+你只需要专注一件事:**调用数字人 provider 生成视频片段**。
 
-## ① CDP 自托管 chromium(优先 · 已有 GUI 真浏览器)
-用户机已经有一个 chromium 在 windows 侧跑,**OpenClaw 已配 attach-only**:
-- 看 `~/.openclaw/openclaw.json` browser 段拿 `cdpUrl`(默认 `http://172.22.144.1:18801` 或 `http://127.0.0.1:18801`)
-- 用 `curl <cdpUrl>/json/version` 验证可达;不通就跳到 ②
-- Python 用 `playwright.chromium.connect_over_cdp(cdpUrl)` 或直接 `websockets` 连 DevTools
-- 新开 page,`page.goto('file:///mnt/c/code/lobsterScan/data/outputs/{run.task_id}/web-presentation/broadcast.html')`
-- 等 `window.__broadcastReady === true`,拿 `window.__broadcastTotalSec`
-- **录屏方式**:Chrome DevTools `Page.startScreencast` API 抓帧 + ffmpeg 拼;或者 `Page.captureScreenshot`
-  每 33ms 抓一帧拼 30fps mp4。**音频从 inline `<audio>` 走 system loopback 录**(WSL 不行就跳 ②)
-- 输出 `data/outputs/{run.task_id}/video/recording.mp4`,size > 500KB,能 ffprobe
+{provider_body}
 
-## ② playwright headless chromium(次选)
-如果 ① 不通(CDP 不可达 / 没 GUI 显示器 / 录音失败):
-- 用挂载的 **playwright-recording** skill 跑:启 headed 1920×1080 chromium
-  (`--window-size=1920,1080 --start-fullscreen --no-sandbox`)
-- file:// 打开 broadcast.html,等 ready 信号
-- 用 `page.video()` 内置录屏 + audio capture(playwright video 默认无音,需要额外 ffmpeg loopback)
-- 输出同上
-
-## ③ slideshow_fallback(兜底)
-①② 都失败 → 走下面 provider 段的数字人 / TTS 路径,backend 兜底拼 slideshow.mp4。
-**不要先就投降走 ③**;必须先认真试 ①。
-
-# 输出
-- 主视频:`intro_video.{{path, kind, duration, has_audio}}`,kind="cdp_recording" | "playwright_recording" | "slideshow_fallback"
-- 数字人开场可作附加:`intro_video_avatar`(可选,失败不阻塞)
-- `recording_method`:["cdp", "playwright", "slideshow"]  数组,记录哪些试过 + 结果
-
----
-
-# 附加 · 数字人开场镜头(可选)
-配额允许时再调下面 provider 出 30 秒数字人开场,作为 broadcast 视频的开场切入。
-失败不阻塞主路径。**主路径是 broadcast.html 录屏,不是数字人**。
-
-{provider_body}"""
+# 降级规则
+如果数字人 provider 调用失败(凭据缺失 / 配额耗尽 / 超时),你**不需要自己录屏或做兜底**。
+只需如实在输出 JSON 中标记 `degraded: true` + `degrade_reason`,backend 会自动走录屏兜底。"""
 
     elif step == "review":
         core = prev["upward_optimization"].output_json or prev["point_extraction"].output_json or {}
@@ -1669,6 +1638,15 @@ ruler 进度尺 + tick 印章替代圆点 + 数字 count-up + 章节段落感。
     else:
         body = "请输出 JSON 代码块。"
 
+    if step == "video_production":
+        return body + """
+
+# 输出格式（强制）
+**你必须先用 Bash 工具真正执行 skill 脚本**,拿到真实的执行结果后,再输出最终 JSON。
+不要跳过 Bash 执行直接编写 JSON — backend 会验证文件是否存在,伪造的路径会被标记 verified=false。
+
+执行完成后,把所有结果汇总到一段 ```json ... ``` 代码块中输出。
+"""
     return body + JSON_RULE
 
 
@@ -1796,8 +1774,16 @@ def _verify_agent_recording_claims(run: TaskRun, out: dict) -> dict:
         rec["verified"] = True
 
     # recording_method 数组只保留 verified 的方式
-    rm_in = out.get("recording_method") or []
-    if isinstance(rm_in, list):
+    rm_in_raw = out.get("recording_method") or []
+    if isinstance(rm_in_raw, list):
+        # agent 可能返回 str 列表或 dict 列表，归一化为 str
+        rm_in: list[str] = []
+        for m in rm_in_raw:
+            if isinstance(m, str):
+                rm_in.append(m)
+            elif isinstance(m, dict):
+                rm_in.append(str(m.get("method") or ""))
+        rm_in = [m for m in rm_in if m]
         rm_keep: list[str] = []
         for m in rm_in:
             field = {"cdp": "cdp_recording", "playwright": "playwright_recording",
@@ -1807,7 +1793,7 @@ def _verify_agent_recording_claims(run: TaskRun, out: dict) -> dict:
         if set(rm_in) != set(rm_keep):
             log.warning("recording_method 假声明 %s → 真实 %s", rm_in, rm_keep)
         out["recording_method"] = rm_keep
-        out["recording_method_claimed"] = rm_in
+        out["recording_method_claimed"] = rm_in_raw
     out["_recording_verifications"] = verifications
     return verifications
 
@@ -2024,12 +2010,12 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
     # video_production 的开场白根据 provider 自适应
     if s.step == "video_production":
         provider = _current_video_provider()
-        if provider.id == "minimax":
-            intro_text = "我用 MiniMax TTS + Hailuo 数字人给每段讲稿配音。"
-        elif provider.id == "none":
+        if provider.id == "none":
             intro_text = "当前是「仅字幕」模式,我只生成 SRT。"
+        elif not provider.implemented:
+            intro_text = f"当前数字人源 {provider.display_name} 暂未接入,我走降级。"
         else:
-            intro_text = f"当前数字人源 = {provider.display_name},暂未接好,我走降级。"
+            intro_text = f"我用 {provider.display_name} 生成数字人视频。"
     intro_msg = _chat_msg(s.agent, intro_text, kind="intro")
     _persist_chat(run, intro_msg)
     await _broadcast(run, "chat.message", intro_msg)
@@ -2876,7 +2862,7 @@ async def _run_step_with_instruction(
     try:
         timeout = 240 if s.step in ("copywriting", "html_design", "review") else 180
         if s.step == "video_production":
-            timeout = 360
+            timeout = 2400
         extra_env = await env_for_agent(s.agent)
         res = await run_agent_turn(
             agent_id=s.agent, message=prompt, timeout_sec=timeout,
@@ -2898,6 +2884,18 @@ async def _run_step_with_instruction(
         _persist_step(run, s)
         if s.step == "html_design":
             _build_html_artifact(run, s, prev)
+        if s.step == "video_production":
+            try:
+                _ensure_audio_segments(run, s, prev)
+            except Exception as e:  # noqa: BLE001
+                log.warning("refine ensure_audio_segments failed: %s", e)
+            try:
+                html_state = prev.get("html_design")
+                if html_state and html_state.status == "success":
+                    _build_html_artifact(run, html_state, prev)
+            except Exception as e:  # noqa: BLE001
+                log.warning("refine broadcast re-render failed: %s", e)
+            _maybe_build_slideshow_fallback(run, s, prev)
     except Exception as e:  # noqa: BLE001
         s.error = str(e)[:500]
         s.status = "failed"

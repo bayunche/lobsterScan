@@ -34,6 +34,7 @@ KNOWN_KEYS = [
     # Kling AI(可灵)— 鉴权要 AK + SK 拼 JWT(env 名跟 clawhub 官方包 klingai-dev/klingai 一致)
     "KLING_ACCESS_KEY_ID",
     "KLING_SECRET_ACCESS_KEY",
+    "DASHSCOPE_API_KEY",
 ]
 
 

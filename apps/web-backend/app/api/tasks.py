@@ -109,7 +109,8 @@ async def list_tasks(limit: int = 20) -> dict:
 
 class RefineRequest(BaseModel):
     action: Literal[
-        "shorter", "more_problem", "more_formal", "more_result", "regenerate_segment"
+        "shorter", "more_problem", "more_formal", "more_result", "regenerate_segment",
+        "retry_video",
     ]
     segment_id: str | None = None
 
@@ -145,6 +146,11 @@ REFINE_ACTION_MAP: dict[str, dict] = {
         "step": "copywriting",
         "instruction": "用户要求重新生成讲稿,请基于当前 ReportCore 重写 narrations(可换钩子、换叙述顺序),保持 info_retention.coverage_pct ≥ 60。",
         "user_note": "好,我让文书重新写一版讲稿。",
+    },
+    "retry_video": {
+        "step": "video_production",
+        "instruction": "请重新生成数字人视频片段(intro + outro)。上次未成功调用数字人 provider,这次请务必真正执行 skill 脚本生成视频文件。",
+        "user_note": "好,我让视频制作重新跑一次。",
     },
 }
 
