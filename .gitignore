@@ -55,5 +55,8 @@ skills/third-party/*/
 # Temp Word lock files
 ~$*.docx
 
+# 测试文件
+testFile/
+
 # TypeScript 增量编译缓存(本地用)
 *.tsbuildinfo
