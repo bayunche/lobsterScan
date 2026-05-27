@@ -28,7 +28,7 @@ OC_JSON = settings.openclaw_json
 LLM_PROVIDERS = ["anthropic", "minimax", "qwen", "glm", "openai", "deepseek"]
 TTS_PROVIDERS = ["minimax", "heygen-builtin", "elevenlabs", "qwen3", "huihuibao"]
 # 与 web-backend/app/video/providers.py 的 REGISTRY 对齐
-VIDEO_PROVIDERS = ["minimax", "heygen", "kling", "self-hosted-sadtalker", "none"]
+VIDEO_PROVIDERS = ["minimax", "heygen", "kling", "dashscope", "self-hosted-sadtalker", "none"]
 
 VIDEO_PROVIDER_DETAILS: list[dict] = [
     {"id": "minimax", "display_name": "MiniMax(Hailuo + speech)",
@@ -71,6 +71,14 @@ VIDEO_PROVIDER_DETAILS: list[dict] = [
          "kling-v3-omni",
          "kling-v2-6",
          "kling-video-o1",
+     ]},
+    {"id": "dashscope", "display_name": "万相 2.7(阿里 DashScope)",
+     "implemented": True,
+     "required_env": ["DASHSCOPE_API_KEY"],
+     "notes": "阿里百炼 DashScope · 万相 2.7 文生视频,TTS 复用 MiniMax",
+     "default_video_model": "wan2.7-t2v-2026-04-25",
+     "available_video_models": [
+         "wan2.7-t2v-2026-04-25",
      ]},
     {"id": "self-hosted-sadtalker", "display_name": "自托管 SadTalker",
      "implemented": False, "required_env": [],
