@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import ChatSidePanel from "@/components/ChatSidePanel";
@@ -84,6 +84,15 @@ function initialMessages(): ChatMsg[] {
 }
 
 export default function HomePage() {
+  // useSearchParams 需要 Suspense 边界（Next.js CSR bailout），否则 next build 预渲染会报错
+  return (
+    <Suspense fallback={<div className="page-bg" />}>
+      <HomePageInner />
+    </Suspense>
+  );
+}
+
+function HomePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const taskId = searchParams.get("task");  // 来自 /tasks 列表点击 → /?task=tsk_xxx
@@ -362,7 +371,9 @@ export default function HomePage() {
           gap: 0.9rem;
           padding: 1.1rem 1.75rem 0.85rem;
           border-bottom: 1px solid var(--line);
-          background: linear-gradient(180deg, var(--paper) 0%, oklch(0.99 0.003 80) 100%);
+          background: var(--glass-surface-2);
+          backdrop-filter: blur(var(--glass-blur-2));
+          -webkit-backdrop-filter: blur(var(--glass-blur-2));
           min-width: 0;
         }
         .head-top {
@@ -380,9 +391,13 @@ export default function HomePage() {
         .brand-name {
           font-family: var(--font-serif);
           font-size: var(--t-xl);
-          font-weight: 600;
-          color: var(--ink);
+          font-weight: 700;
           line-height: 1;
+          background: linear-gradient(135deg, var(--color-primary-500), var(--color-accent-500));
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
         }
         .brand-sub {
           color: var(--ink-mute);
@@ -425,7 +440,9 @@ export default function HomePage() {
         :global(.mbr) {
           display: flex; align-items: center; gap: 0.45rem;
           padding: 0.3rem 0.7rem 0.3rem 0.35rem;
-          background: var(--paper-warm);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           border: 1px solid var(--line-soft);
           border-radius: var(--r-pill);
           flex-shrink: 0;
@@ -503,9 +520,11 @@ export default function HomePage() {
         .composer-pad {
           max-width: 760px; margin: 0 auto;
           display: flex; align-items: flex-end; gap: 0.6rem;
-          background: var(--paper-warm);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           border: 1px solid var(--line);
-          border-radius: 14px;
+          border-radius: var(--r-lg);
           padding: 0.5rem 0.5rem 0.5rem 0.65rem;
           box-shadow: 0 1px 0 oklch(0.20 0.02 250 / 0.03),
                       0 4px 16px -12px oklch(0.20 0.02 250 / 0.14);
@@ -543,20 +562,24 @@ export default function HomePage() {
         :global(.cp-input::placeholder) { color: var(--ink-mute); }
         :global(.cp-send) {
           flex-shrink: 0;
-          background: var(--ink);
-          color: var(--paper);
+          background: var(--seal);
+          color: #fff;
           border: 0;
           padding: 0.6rem 1.1rem;
-          border-radius: var(--r-2);
+          border-radius: var(--r-pill);
           font-family: var(--font-sans);
           font-size: var(--t-sm);
           cursor: pointer;
           display: inline-flex; align-items: center; gap: 0.6rem;
+          box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
           transition: all var(--t-base) var(--ease);
         }
-        :global(.cp-send:hover:not(:disabled)) { background: var(--seal); }
-        :global(.cp-send:disabled) { opacity: 0.35; cursor: not-allowed; }
-        :global(.cp-hint) { color: var(--paper); opacity: 0.55; }
+        :global(.cp-send:hover:not(:disabled)) {
+          background: var(--seal-deep);
+          box-shadow: 0 4px 16px rgba(13, 148, 136, 0.35);
+        }
+        :global(.cp-send:disabled) { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+        :global(.cp-hint) { color: #fff; opacity: 0.6; }
 
         .cp-meta {
           max-width: 760px; margin: 0.5rem auto 0;
@@ -639,10 +662,12 @@ function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
           <style jsx>{`
             .bb-launch {
               border: 1px solid var(--line);
-              background: var(--paper-warm);
-              border-radius: 12px;
+              background: var(--glass-surface-1);
+              backdrop-filter: blur(var(--glass-blur-2));
+              -webkit-backdrop-filter: blur(var(--glass-blur-2));
+              border-radius: var(--r-lg);
               padding: 0.85rem 1rem;
-              box-shadow: var(--shadow-bubble);
+              box-shadow: var(--shadow-glass);
               max-width: 92%;
               align-self: center;
               width: 100%;
@@ -732,13 +757,13 @@ function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
             align-items: flex-end; gap: 0.35rem;
           }
           .bb-user-body {
-            background: var(--ink);
-            color: var(--paper);
+            background: linear-gradient(135deg, var(--color-primary-500) 0%, var(--color-primary-600) 100%);
+            color: #fff;
             padding: 0.85rem 1.1rem;
             border-radius: 1.1rem 1.1rem 0.25rem 1.1rem;
             font-size: 0.95rem;
             line-height: 1.55;
-            box-shadow: var(--shadow-bubble);
+            box-shadow: 0 2px 12px rgba(13, 148, 136, 0.22);
             white-space: pre-wrap;
           }
           .bb-user-meta {
@@ -817,7 +842,9 @@ function Bubble({ msg, prev }: { msg: ChatMsg; prev?: ChatMsg }) {
           align-self: center;
         }
         .bb-body {
-          background: var(--paper-warm);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           border: 1px solid var(--line-soft);
           padding: 0.8rem 1rem;
           border-radius: 0.25rem 1.1rem 1.1rem 1.1rem;
@@ -920,10 +947,10 @@ function ArtifactChip({ a }: { a: Artifact }) {
         }
         .chip:hover { border-color: var(--ink); transform: translateY(-1px); }
         .chip-feature {
-          border-color: var(--seal); background: rgba(198,84,60,0.05); color: var(--seal);
+          border-color: var(--seal); background: var(--seal-soft); color: var(--seal);
           font-weight: 500;
         }
-        .chip-feature:hover { background: rgba(198,84,60,0.1); border-color: var(--seal); }
+        .chip-feature:hover { background: rgba(20,184,166,0.18); border-color: var(--seal); }
         .chip-icon {
           font-family: var(--font-mono);
           font-size: 0.7rem;

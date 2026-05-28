@@ -366,7 +366,7 @@ export default function ConfigPage() {
         </div>
       )}
 
-      <style>{`.input,.select{width:100%;border:1px solid #e5e5e5;border-radius:0.5rem;padding:0.5rem 0.75rem;font-size:0.875rem;background:white}`}</style>
+      <style>{`.input,.select{width:100%;border:1px solid var(--line);border-radius:var(--r-2);padding:0.5rem 0.75rem;font-size:0.875rem;background:var(--glass-surface-1);-webkit-backdrop-filter:blur(var(--glass-blur-1));backdrop-filter:blur(var(--glass-blur-1));color:var(--ink)}.input:focus,.select:focus{outline:none;border-color:var(--color-primary-400);box-shadow:var(--shadow-focus)}`}</style>
     </div>
   );
 }
