@@ -110,9 +110,23 @@ export default function TasksPage() {
         )}
 
         <style jsx>{`
-          .task-list-shell { max-width: 980px; padding: 2rem; }
+          .app-grid {
+            display: flex;
+            align-items: stretch;
+            min-height: 100vh;
+            min-width: 0;
+          }
+          .task-list-shell {
+            flex: 1;
+            min-width: 0;
+            width: 100%;
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 2.5rem 2.5rem 4rem;
+          }
           .head {
             display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 1rem;
             margin-bottom: 1.5rem; padding-bottom: 1rem;
             border-bottom: 1px solid var(--line);
           }
@@ -123,11 +137,15 @@ export default function TasksPage() {
           .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
           .card {
             display: block; padding: 0.85rem 1rem;
-            border: 1px solid var(--line); border-radius: var(--r-2);
-            background: var(--paper); color: var(--ink); text-decoration: none;
+            border: 1px solid var(--glass-border); border-radius: var(--r-lg);
+            background: var(--glass-surface-1);
+            backdrop-filter: blur(var(--glass-blur-1));
+            -webkit-backdrop-filter: blur(var(--glass-blur-1));
+            box-shadow: var(--shadow-glass);
+            color: var(--ink); text-decoration: none;
             transition: all var(--t-fast) var(--ease);
           }
-          .card:hover { border-color: var(--ink); transform: translateY(-1px); }
+          .card:hover { border-color: var(--color-primary-300); transform: translateY(-2px); box-shadow: var(--shadow-elev); }
           .card-row1 {
             display: flex; align-items: center; gap: 0.6rem;
             margin-bottom: 0.35rem;
@@ -143,10 +161,22 @@ export default function TasksPage() {
             font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 999px;
             font-family: var(--font-mono); flex-shrink: 0;
           }
-          .tag-ok   { background: #e8f1e3; color: #3d5b32; }
-          .tag-warn { background: #fdf1d6; color: #876b1f; }
-          .tag-fail { background: #f7dbd1; color: #8a3422; }
-          .tag-run  { background: var(--ink); color: var(--paper); }
+          .tag-ok   { background: var(--ok-soft);   color: var(--ok); }
+          .tag-warn { background: var(--warn-soft); color: var(--warn); }
+          .tag-fail { background: var(--fail-soft); color: var(--fail); }
+          .tag-run  { background: var(--seal-soft); color: var(--seal); }
+
+          @media (max-width: 880px) {
+            .app-grid { flex-direction: column; }
+            .task-list-shell { padding: 1.5rem 1.25rem 3rem; }
+          }
+          @media (max-width: 560px) {
+            .task-list-shell { padding: 1.25rem 1rem 2.5rem; }
+            .head { flex-direction: column; gap: 0.5rem; }
+            .head-meta { align-self: flex-start; }
+            .card-row2 { flex-wrap: wrap; gap: 0.3rem 0.55rem; }
+            .card-row2 .grow { display: none; }
+          }
         `}</style>
       </main>
     </div>

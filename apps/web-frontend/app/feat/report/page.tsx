@@ -167,7 +167,11 @@ export default function FeatReportPage() {
 
       <div className="shell">
         <section className="hero">
-          <h1 className="hero-title">交一份材料，集群帮你做完汇报</h1>
+          <div className="hero-badge">
+            <span className="hero-badge-dot" />
+            会汇报 · 多智能体协作
+          </div>
+          <h1 className="hero-title">交一份材料，集群帮你<span className="gradient-text">做完汇报</span></h1>
           <p className="hero-sub">
             原文 / 表格 / 截图 / 录音 / 视频都行 — 资料员先拆，<span className="ink">分析师</span>挑重点、
             <span className="ink">表达教练</span>换视角、文书写讲稿、设计师出 HTML、
@@ -364,21 +368,46 @@ export default function FeatReportPage() {
 
         /* === hero === */
         .hero { display: flex; flex-direction: column; gap: 0.65rem; }
+        .hero-badge {
+          align-self: flex-start;
+          display: inline-flex; align-items: center; gap: 0.5rem;
+          padding: 0.3rem 0.85rem;
+          border-radius: var(--r-pill);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
+          border: 1px solid var(--glass-border);
+          font-family: var(--font-mono);
+          font-size: var(--t-mono-xs);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--seal);
+          margin-bottom: 0.35rem;
+          animation: fade-up 0.7s var(--ease-out) 0.02s both;
+        }
+        .hero-badge-dot {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: var(--color-primary-400);
+          animation: breathe 3s ease-in-out infinite;
+        }
         .hero-title {
           font-family: var(--font-serif);
-          font-size: 2rem;
-          font-weight: 600;
-          letter-spacing: -0.01em;
+          font-size: clamp(2rem, 4.5vw, 2.75rem);
+          font-weight: 700;
+          letter-spacing: -0.015em;
+          line-height: 1.18;
           margin: 0;
           color: var(--ink);
+          animation: fade-up 0.8s var(--ease-out) 0.12s both;
         }
         .hero-sub {
           margin: 0;
           color: var(--ink-soft);
           line-height: 1.7;
           font-size: 0.95rem;
+          animation: fade-up 0.8s var(--ease-out) 0.24s both;
         }
-        .hero-sub .ink { color: var(--ink); font-weight: 500; }
+        .hero-sub .ink { color: var(--seal); font-weight: 600; }
 
         /* === 上传区（视觉焦点） === */
         .drop {
@@ -387,8 +416,10 @@ export default function FeatReportPage() {
           gap: 1.25rem;
           padding: 1.75rem 1.5rem;
           border: 2px dashed var(--line);
-          border-radius: 14px;
-          background: var(--paper-warm);
+          border-radius: var(--r-lg);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           cursor: pointer;
           transition: all var(--t-base) var(--ease);
         }
@@ -521,10 +552,10 @@ export default function FeatReportPage() {
           font-family: var(--font-sans);
           font-size: 0.78rem;
           color: var(--ink-mute);
-          padding: 0.35rem 0.65rem;
-          background: rgba(0, 0, 0, 0.02);
+          padding: 0.45rem 0.7rem;
+          background: var(--seal-soft);
           border-left: 2px solid var(--seal);
-          border-radius: 0 4px 4px 0;
+          border-radius: 0 var(--r-1) var(--r-1) 0;
           line-height: 1.55;
         }
 
@@ -554,7 +585,7 @@ export default function FeatReportPage() {
         .supp-chip:hover {
           color: var(--seal);
           border-color: var(--seal);
-          background: rgba(198, 84, 60, 0.04);
+          background: var(--seal-soft);
         }
         .supp-count { color: var(--ink-mute); margin-left: auto; }
 
@@ -562,9 +593,12 @@ export default function FeatReportPage() {
         .cfg {
           display: flex; flex-direction: column; gap: 1rem;
           padding: 1.25rem 1.35rem;
-          background: var(--paper);
-          border: 1px solid var(--line);
-          border-radius: 12px;
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
+          border: 1px solid var(--glass-border);
+          border-radius: var(--r-lg);
+          box-shadow: var(--shadow-glass);
         }
         .cfg-head { color: var(--ink-mute); margin-bottom: 0.15rem; }
         :global(.text-input) {
@@ -597,7 +631,7 @@ export default function FeatReportPage() {
         }
         :global(.chip2:hover) { border-color: var(--ink-soft); color: var(--ink); }
         :global(.chip2-on) {
-          background: var(--ink); color: var(--paper); border-color: var(--ink);
+          background: var(--seal); color: #fff; border-color: var(--seal);
         }
 
         /* === 错误条 === */
@@ -625,21 +659,22 @@ export default function FeatReportPage() {
         .submit-btn {
           display: inline-flex; align-items: center; gap: 0.65rem;
           padding: 0.85rem 1.6rem;
-          background: var(--ink);
-          color: var(--paper);
+          background: var(--seal);
+          color: #fff;
           border: 0;
-          border-radius: 12px;
+          border-radius: var(--r-pill);
           font-family: var(--font-sans);
           font-size: 0.95rem;
           font-weight: 500;
           cursor: pointer;
           transition: all var(--t-base) var(--ease);
-          box-shadow: 0 2px 4px oklch(0.20 0.02 250 / 0.08),
-                      0 16px 32px -20px oklch(0.20 0.02 250 / 0.5);
+          box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25),
+                      0 16px 32px -20px rgba(13, 148, 136, 0.6);
         }
         .submit-btn:hover:not(:disabled) {
-          background: var(--seal);
+          background: var(--seal-deep);
           transform: translateY(-1px);
+          box-shadow: 0 4px 16px rgba(13, 148, 136, 0.35);
         }
         .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
         .submit-arrow {

@@ -74,7 +74,9 @@ export default function SideRail() {
           width: 220px;
           flex-shrink: 0;
           border-right: 1px solid var(--line);
-          background: var(--paper-warm);
+          background: var(--glass-surface-2);
+          backdrop-filter: blur(var(--glass-blur-2));
+          -webkit-backdrop-filter: blur(var(--glass-blur-2));
           display: flex;
           flex-direction: column;
           padding: 0;
@@ -91,7 +93,12 @@ export default function SideRail() {
         .rail-name {
           font-family: var(--font-serif);
           font-size: var(--t-lg);
-          font-weight: 600;
+          font-weight: 700;
+          background: linear-gradient(135deg, var(--color-primary-500), var(--color-accent-500));
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
         }
         .rail-sub { color: var(--ink-mute); margin-top: 2px; }
 
@@ -111,15 +118,16 @@ export default function SideRail() {
           transition: all var(--t-fast) var(--ease);
         }
         :global(.rail-item:hover) {
-          background: var(--paper);
+          background: var(--glass-surface-1);
           color: var(--ink);
         }
         :global(.rail-item.on) {
-          background: var(--ink);
-          color: var(--paper);
+          background: var(--seal);
+          color: #fff;
+          box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
         }
         :global(.rail-item.on .rail-code),
-        :global(.rail-item.on .rail-hint) { color: var(--paper); opacity: 0.5; }
+        :global(.rail-item.on .rail-hint) { color: #fff; opacity: 0.7; }
         .rail-code {
           font-family: var(--font-mono);
           font-size: var(--t-mono-xs);
@@ -145,6 +153,47 @@ export default function SideRail() {
           border-top: 1px solid var(--line);
           color: var(--ink-mute);
           display: flex; align-items: center; gap: 0.5rem;
+        }
+
+        /* ───── 移动端：侧栏转为横向顶部条 ───── */
+        @media (max-width: 880px) {
+          .rail {
+            width: 100%;
+            min-height: auto;
+            flex-direction: row;
+            align-items: center;
+            border-right: 0;
+            border-bottom: 1px solid var(--line);
+            position: sticky;
+            top: 0;
+            z-index: 20;
+          }
+          :global(.rail-brand) {
+            padding: 0.7rem 1rem;
+            flex-shrink: 0;
+            border-bottom: 0;
+            border-right: 1px solid var(--line-soft);
+          }
+          nav {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.45rem 0.6rem;
+            overflow-x: auto;
+            scrollbar-width: none;
+          }
+          nav::-webkit-scrollbar { display: none; }
+          .rail-section { display: none; }
+          .rail-list { display: flex; flex-direction: row; gap: 0.4rem; }
+          .rail-list + .rail-list { margin-left: 0.4rem; }
+          :global(.rail-item) { padding: 0.4rem 0.7rem; white-space: nowrap; }
+          .rail-hint { display: none; }
+          .rail-foot { display: none; }
+        }
+        @media (max-width: 480px) {
+          .rail-label { font-size: var(--t-sm); }
+          .rail-code { display: none; }
         }
       `}</style>
     </aside>

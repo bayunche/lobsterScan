@@ -116,7 +116,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           min-width: 248px;
           box-sizing: border-box;
           border-right: 1px solid var(--line);
-          background: linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
+          background: var(--glass-surface-2);
+          backdrop-filter: blur(var(--glass-blur-2));
+          -webkit-backdrop-filter: blur(var(--glass-blur-2));
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -150,9 +152,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         :global(.brand-name) {
           font-family: var(--font-serif);
           font-size: var(--t-lg);
-          font-weight: 600;
+          font-weight: 700;
           line-height: 1.15;
           letter-spacing: -0.005em;
+          background: linear-gradient(135deg, var(--color-primary-500), var(--color-accent-500));
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          color: transparent;
         }
         :global(.brand-sub) {
           color: var(--ink-mute);
@@ -204,16 +211,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           position: relative;
         }
         :global(.nav-item:hover) {
-          background: var(--paper);
+          background: var(--glass-surface-1);
           color: var(--ink);
         }
         :global(.nav-item-on) {
-          background: var(--paper);
+          background: var(--glass-surface-1);
           color: var(--ink);
           font-weight: 600;
           box-shadow:
             inset 3px 0 0 0 var(--seal),
-            0 1px 2px oklch(0.20 0.02 250 / 0.04);
+            0 1px 2px rgba(0, 0, 0, 0.04);
         }
         :global(.nav-item-on .nav-icon) { color: var(--seal); }
 
@@ -252,7 +259,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           position: fixed; top: 0.85rem; left: 0.85rem;
           z-index: 60;
           width: 38px; height: 38px;
-          background: var(--paper);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-2));
+          -webkit-backdrop-filter: blur(var(--glass-blur-2));
           border: 1px solid var(--line);
           border-radius: var(--r-2);
           padding: 0;

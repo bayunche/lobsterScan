@@ -118,7 +118,9 @@ export default function ChatSidePanel() {
         .side {
           width: 100%;
           border-left: 1px solid var(--line);
-          background: var(--paper);
+          background: var(--glass-surface-2);
+          backdrop-filter: blur(var(--glass-blur-2));
+          -webkit-backdrop-filter: blur(var(--glass-blur-2));
           padding: 1.25rem 1.15rem 1.25rem;
           display: flex;
           flex-direction: column;
@@ -132,12 +134,12 @@ export default function ChatSidePanel() {
         :global(.cta) {
           display: flex; align-items: center; gap: 0.75rem;
           padding: 0.85rem 0.95rem;
-          background: var(--ink);
-          color: var(--paper);
-          border-radius: var(--r-4);
+          background: linear-gradient(135deg, var(--color-primary-500) 0%, var(--color-primary-700) 100%);
+          color: #fff;
+          border-radius: var(--r-lg);
           text-decoration: none;
-          box-shadow: 0 2px 4px oklch(0.20 0.02 250 / 0.08),
-                      0 12px 24px -16px oklch(0.20 0.02 250 / 0.4);
+          box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25),
+                      0 12px 24px -16px rgba(13, 148, 136, 0.6);
           transition: all var(--t-base) var(--ease);
           position: relative;
           overflow: hidden;
@@ -145,19 +147,19 @@ export default function ChatSidePanel() {
         :global(.cta)::before {
           content: "";
           position: absolute; inset: 0;
-          background: linear-gradient(135deg, oklch(0.55 0.18 30 / 0.12) 0%, transparent 60%);
+          background: linear-gradient(135deg, rgba(255, 255, 255, 0.20) 0%, transparent 60%);
           opacity: 0;
           transition: opacity var(--t-base) var(--ease);
         }
         :global(.cta:hover) {
           transform: translateY(-1px);
-          box-shadow: 0 4px 8px oklch(0.20 0.02 250 / 0.12),
-                      0 16px 32px -16px oklch(0.20 0.02 250 / 0.5);
+          box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3),
+                      0 16px 32px -16px rgba(13, 148, 136, 0.7);
         }
         :global(.cta:hover::before) { opacity: 1; }
         :global(.cta-icon) {
           width: 38px; height: 38px;
-          background: oklch(0.30 0.025 245);
+          background: rgba(255, 255, 255, 0.18);
           border-radius: var(--r-2);
           display: inline-flex; align-items: center; justify-content: center;
           font-size: 1.1rem;
@@ -174,7 +176,7 @@ export default function ChatSidePanel() {
           font-size: 0.95rem;
           font-weight: 600;
         }
-        :global(.cta-sub) { color: var(--paper); opacity: 0.6; }
+        :global(.cta-sub) { color: #fff; opacity: 0.72; }
         :global(.cta-arrow) {
           font-family: var(--font-mono);
           font-size: 1.1rem;
@@ -223,14 +225,16 @@ export default function ChatSidePanel() {
         :global(.task-row) {
           display: flex; flex-direction: column; gap: 0.4rem;
           padding: 0.6rem 0.7rem;
-          background: var(--paper-warm);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           border: 1px solid var(--line-soft);
           border-radius: var(--r-2);
           text-decoration: none;
           color: inherit;
-          transition: border-color var(--t-base) var(--ease);
+          transition: border-color var(--t-base) var(--ease), transform var(--t-base) var(--ease);
         }
-        :global(.task-row:hover) { border-color: var(--ink-soft); }
+        :global(.task-row:hover) { border-color: var(--color-primary-300); transform: translateY(-1px); }
         :global(.task-row-top) {
           display: flex; align-items: center; gap: 0.4rem;
           min-width: 0;
@@ -286,7 +290,9 @@ export default function ChatSidePanel() {
           align-items: center;
           gap: 0.7rem;
           padding: 0.7rem 0.85rem;
-          background: var(--paper-warm);
+          background: var(--glass-surface-1);
+          backdrop-filter: blur(var(--glass-blur-1));
+          -webkit-backdrop-filter: blur(var(--glass-blur-1));
           border: 1px solid var(--line);
           border-radius: var(--r-2);
           color: var(--ink);
@@ -294,8 +300,8 @@ export default function ChatSidePanel() {
           transition: all var(--t-base) var(--ease);
         }
         :global(.admin-entry:hover) {
-          border-color: var(--ink);
-          background: var(--paper);
+          border-color: var(--color-primary-300);
+          background: var(--glass-surface-2);
         }
         :global(.ae-icon) {
           width: 32px; height: 32px;
