@@ -173,3 +173,8 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   bound (pipeline uses `--local`, so the gateway isn't required for report generation).
 - Each agent gets an isolated `agentDir` (`~/.openclaw/agents/<id>`) and workspace
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->

@@ -41,8 +41,9 @@ openclaw/.backups/
 openclaw/workspaces/
 ~/.openclaw/
 
-# Claude Code 本地配置
-.claude/
+# Claude Code 本地配置：只忽略 per-user 的 settings.local.json；
+# settings.json（项目级 plugin 开关）和 skills/（spec-kit 等共享命令）需入库。
+.claude/settings.local.json
 
 # 日志
 *.log
