@@ -102,6 +102,9 @@ class FeatReportRequest(BaseModel):
     # 用户补充说明 — 最高优先级业务指令,贯穿 8 个 step
     supplement: str = ""
     file_ids: list[str] = []
+    # v2 群聊 harness 路径 flag(P1, spec 001-v2-chat-protocol-state)。
+    # 默认 v1;非 "v1"/"v2" 一律降级。**绝不**外露在用户可见层(宪章原则 I)。
+    harness_version: str | None = None
 
 
 @router.post("/chat")
@@ -350,6 +353,7 @@ async def feat_report(req: FeatReportRequest) -> dict:
         style=req.style,
         raw_text=raw_text,
         supplement=req.supplement,
+        harness_version=req.harness_version,
     )
 
     # 用户系统消息：带附件 + 任务元信息

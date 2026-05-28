@@ -49,6 +49,10 @@ class CreateTaskRequest(BaseModel):
     )
     file_ids: list[str] = Field(default_factory=list)
     user_hints: dict = Field(default_factory=dict)
+    # v2 群聊 harness 路径 flag(P1, spec 001-v2-chat-protocol-state)。
+    # 默认 v1(行为与改造前完全一致);非 "v1"/"v2" 一律降级为 "v1"。
+    # 仅用于内部 / admin 控制台;**绝不**外露在用户可见层(宪章原则 I)。
+    harness_version: Literal["v1", "v2"] | None = None
 
 
 class CreateTaskResponse(BaseModel):
@@ -77,6 +81,7 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
         style=req.style,
         raw_text=req.raw_text,
         supplement=req.supplement,
+        harness_version=req.harness_version,
     )
     # 异步跑 pipeline，不阻塞响应
     asyncio.create_task(pipeline.execute(run))

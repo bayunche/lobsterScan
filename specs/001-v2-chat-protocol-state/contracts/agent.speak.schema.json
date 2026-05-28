@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lobsterScan.local/v2/agent.speak.schema.json",
+  "title": "AgentSpeak",
+  "description": "v2 群聊事件 · agent 主动发言（带 mentions / cc / reply_to / intent / artifact_updates）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["msg_type", "message_id", "task_id", "ts", "from", "text", "intent"],
+  "properties": {
+    "msg_type": { "const": "agent.speak" },
+    "message_id": {
+      "type": "string",
+      "pattern": "^msg_[a-f0-9]{8}$",
+      "description": "任务内唯一；emit 前校验去重"
+    },
+    "task_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "number", "description": "Unix epoch seconds" },
+    "from": {
+      "type": "string",
+      "description": "发言者 agent_id（9 位之一：coordinator / material / point-extractor / structure / upward-opt / copywriter / html-designer / video-producer / reviewer / user）"
+    },
+    "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "mentions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "cc": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "reply_to": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" }
+      ],
+      "default": null,
+      "description": "回复某条 message_id；不存在的 reply_to 保留不校验"
+    },
+    "intent": {
+      "type": "string",
+      "enum": ["ask", "propose", "challenge", "confirm", "yield", "done"]
+    },
+    "artifact_updates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ArtifactRef" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": ["MaterialPool", "ReportCore", "Outline", "Script"]
+        },
+        "version": { "type": "integer", "minimum": 1 },
+        "base_version": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 1 }
+          ],
+          "default": null
+        },
+        "delta_summary": {
+          "type": "string",
+          "maxLength": 60,
+          "default": ""
+        }
+      }
+    }
+  }
+}

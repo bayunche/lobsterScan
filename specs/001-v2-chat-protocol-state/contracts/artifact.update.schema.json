@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lobsterScan.local/v2/artifact.update.schema.json",
+  "title": "ArtifactUpdate",
+  "description": "v2 产物变更通知 · 4 核心 artifact（MaterialPool / ReportCore / Outline / Script）写入时由 artifacts_v2.write_versioned() emit。HTML / 视频不参与此事件（继续 latest-wins）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["msg_type", "message_id", "task_id", "ts", "id", "version", "producer", "ref"],
+  "properties": {
+    "msg_type": { "const": "artifact.update" },
+    "message_id": { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "number" },
+    "id": {
+      "type": "string",
+      "enum": ["MaterialPool", "ReportCore", "Outline", "Script"],
+      "description": "P1 只覆盖 4 个核心 artifact；其它 artifact 不发本事件"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "单调递增整数；首次写入为 1"
+    },
+    "base_version": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "default": null,
+      "description": "基于哪个版本写入；首次为 null。P6 并发冲突解决会用到此字段"
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "写入者 agent_id"
+    },
+    "delta_summary": {
+      "type": "string",
+      "maxLength": 60,
+      "default": "",
+      "description": "≤60 字简述本次差异"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^data/outputs/[^/]+/(material_pool|report_core|outline|script)_v[0-9]+\\.(json|md)$",
+      "description": "相对路径，指向带版本号的持久化文件"
+    }
+  }
+}

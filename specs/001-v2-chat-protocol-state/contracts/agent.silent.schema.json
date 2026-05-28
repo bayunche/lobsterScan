@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lobsterScan.local/v2/agent.silent.schema.json",
+  "title": "AgentSilent",
+  "description": "v2 群聊事件 · agent 被 @ 但没东西可说（避免管线静默；前端可灰显「X 听完了，没补充」）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["msg_type", "message_id", "task_id", "ts", "from", "reason"],
+  "properties": {
+    "msg_type": { "const": "agent.silent" },
+    "message_id": { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "number" },
+    "from": { "type": "string" },
+    "reply_to": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" }
+      ],
+      "default": null
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30,
+      "description": "业务化中文短句；典型：「已经被 X 说了」/「无新信息」/「需要 Y 先出 artifact」"
+    }
+  }
+}

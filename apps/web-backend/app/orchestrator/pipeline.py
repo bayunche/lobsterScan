@@ -188,6 +188,10 @@ class TaskRun:
     created_at: float = field(default_factory=time.time)
     steps: list[StepState] = field(default_factory=list)
     subscribers: list[asyncio.Queue] = field(default_factory=list)
+    # v2 群聊化 harness 路径 flag(P1, spec 001-v2-chat-protocol-state)。
+    # 默认 v1(行为与改造前完全一致);非 "v1"/"v2" 一律降级为 "v1"(FR-002 防御)。
+    # 仅决定本任务是否启用 v2 事件 emit + artifact 版本化,worker/coordinator 行为不变(P2-P5)。
+    harness_version: str = "v1"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -198,6 +202,7 @@ class TaskRun:
             "duration": self.duration,
             "style": self.style,
             "status": self.status,
+            "harness_version": self.harness_version,  # v2: 仅 admin / log 用,不外露用户层(原则 I)
             "created_at": _iso(self.created_at),
             "steps": [
                 {
@@ -1740,6 +1745,86 @@ def _persist_final(run: TaskRun) -> None:
     )
 
 
+async def _emit_v2_finalization(state: Any, run: TaskRun) -> None:
+    """P1 v2(spec 001-v2-chat-protocol-state)收尾期 v2 emit + 4 核心 artifact 版本化。
+
+    P2-P5 阶段每个 agent 会在自己 step 里 emit 真业务 speak/silent;P1 仅在收尾时 emit
+    一组示例 + 给 4 核心 artifact 写带版本号副本,证明 v2 协议栈端到端跑通
+    (spec FR-004 / FR-010 / SC-002 / SC-003)。
+
+    宪章原则 III(降级而非崩溃):任何 v2 emit / 写入失败都仅 log warn,不影响任务状态。
+    """
+    from .artifacts_v2 import write_versioned
+    from .events_v2 import (
+        AgentSilent, AgentSpeak, ArtifactRef, CoordinatorIntervene, ReviewerVerdict,
+    )
+
+    # ① 4 核心 artifact 版本化(基于已成功的 step.output_json 派生)
+    artifact_map = [
+        ("material_parsing",    "material",        "MaterialPool", lambda j: j),
+        ("point_extraction",    "point-extractor", "ReportCore",   lambda j: j),
+        ("structure_building",  "structure",       "Outline",      lambda j: j),
+        ("copywriting",         "copywriter",      "Script",       lambda j: j.get("script_md") or ""),
+    ]
+    for step_key, producer, artifact_id, extractor in artifact_map:
+        s = next((x for x in run.steps if x.step == step_key), None)
+        if s is None or s.status != "success" or not s.output_json:
+            continue
+        try:
+            payload = extractor(s.output_json)
+            if not payload:
+                continue
+            await write_versioned(
+                state=state, artifact_id=artifact_id, payload=payload,
+                producer=producer, base_version=None,
+                delta_summary=f"{step_key} 首版产物",
+            )
+        except Exception as e:  # noqa: BLE001 — FR-020 降级
+            log.warning("v2 write_versioned %s failed: %s", artifact_id, e)
+
+    # ② 收尾期 5 类示例 v2 事件(P5 之后由 prompt 真实驱动)
+    try:
+        # agent.speak — 资料员发言 + @ 分析师
+        material_step = next(
+            (x for x in run.steps if x.step == "material_parsing" and x.status == "success"),
+            None,
+        )
+        if material_step:
+            await state.emit_v2(AgentSpeak(
+                task_id=run.task_id, **{"from": "material"},
+                text="素材池已整理完毕,后面交给分析师。",
+                mentions=["point-extractor"], cc=[], reply_to=None,
+                intent="propose", artifact_updates=[],
+            ))
+        # agent.silent — 设计师听完没补充
+        await state.emit_v2(AgentSilent(
+            task_id=run.task_id, **{"from": "html-designer"},
+            reply_to=None, reason="设计已按文书讲稿落地,无需补充",
+        ))
+        # coordinator.intervene — 输出门通过 / 拒绝(纯发声,不路由)
+        gate_kind = "gate_pass" if run.status == "done" else "gate_reject"
+        gate_text = {
+            "gate_pass":   "全部 artifact 齐了,task 收尾。",
+            "gate_reject": "有 step 未跑完,先按 partial 交付,稍后可补。",
+        }.get(gate_kind, "task 收尾。")
+        await state.emit_v2(CoordinatorIntervene(
+            task_id=run.task_id, kind=gate_kind, text=gate_text, hint_agent=None,
+        ))
+        # reviewer.verdict — pass / fail 双轨结论(示例;P4 才落真双轨)
+        await state.emit_v2(ReviewerVerdict(
+            task_id=run.task_id,
+            verdict="pass" if run.status == "done" else "fail",
+            dimension="quality", findings=[], suggested_fix_agent=None,
+            suggestions=[
+                "建议把核心数据前置到讲稿第二段",
+                "建议给风险段配明确的补救计划 owner",
+                "建议在结尾用一句话再次强调下一步动作",
+            ],
+        ))
+    except Exception as e:  # noqa: BLE001 — FR-020
+        log.warning("v2 finalization emit failed: %s", e)
+
+
 def _verify_agent_recording_claims(run: TaskRun, out: dict) -> dict:
     """验证 agent 声明的 cdp_recording / playwright_recording / intro_video 文件**真实存在 + 大小达标**。
     虚假声明的字段标 verified=False,recording_method 数组重新筛选只保留 verified 的。
@@ -2481,12 +2566,16 @@ async def _coordinator_briefing(run: TaskRun) -> None:
 def create_task(
     *, task_id: str, title: str, report_type: str, audience: str,
     duration: str, style: str, raw_text: str, supplement: str = "",
+    harness_version: str | None = None,
 ) -> TaskRun:
+    # v2 群聊 harness flag(P1)。非 "v1"/"v2" 一律降级为 "v1"(FR-002)。
+    hv = harness_version if harness_version in ("v1", "v2") else "v1"
     run = TaskRun(
         task_id=task_id, title=title, report_type=report_type,
         audience=audience, duration=duration, style=style, raw_text=raw_text,
         supplement=supplement,
         steps=[StepState(step=k, label=l, agent=a) for k, a, l, _ in STEPS],
+        harness_version=hv,
     )
     _runs[task_id] = run
     return run
@@ -2532,6 +2621,7 @@ async def execute(run: TaskRun) -> None:
     from .harness import run_harness
 
     events_jsonl_path = run.output_dir() / "events.jsonl"
+    is_v2 = run.harness_version == "v2"
     harness_result = await run_harness(
         run=run,
         prev=prev,
@@ -2543,6 +2633,7 @@ async def execute(run: TaskRun) -> None:
         chat_publisher=_chat_publisher,
         events_jsonl_path=events_jsonl_path,
         agent_display=AGENT_DISPLAY,  # 用户可见 chat 文案显示名 ↔ agent_id 映射
+        is_v2=is_v2,                  # v2 群聊 harness flag(P1,默认 False;True 时启用 v2 事件 emit)
     )
     log.info("harness done · reason=%s · chain=%s · visited=%s · events=%d",
              harness_result.get("reason"),
@@ -2569,6 +2660,17 @@ async def execute(run: TaskRun) -> None:
         else "partial" if has_success
         else "failed"
     )
+
+    # P1 v2 收尾:若本任务走 v2 路径,补一组 5 类示例事件 + 4 核心 artifact 版本化。
+    # v1 路径 / state 取不到都跳过,_persist_final 仍按原逻辑写 task.json(FR-002 / FR-020)。
+    if is_v2:
+        v2_state = harness_result.get("_state") if harness_result else None
+        if v2_state is not None:
+            try:
+                await _emit_v2_finalization(v2_state, run)
+            except Exception as e:  # noqa: BLE001
+                log.warning("v2 finalization wrapper failed: %s", e)
+
     _persist_final(run)
     # coordinator 收尾发言
     closing_text = {

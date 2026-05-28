@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lobsterScan.local/v2/coordinator.intervene.schema.json",
+  "title": "CoordinatorIntervene",
+  "description": "v2 流程纠偏事件 · Coordinator 在群里发声但不路由 next-speaker。仅 6 个 kind 之一；P1 仅承载 schema，行为在 P3 实装。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["msg_type", "message_id", "task_id", "ts", "kind", "text"],
+  "properties": {
+    "msg_type": { "const": "coordinator.intervene" },
+    "message_id": { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "number" },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "loop_detected",
+        "stagnation",
+        "drift",
+        "budget",
+        "gate_pass",
+        "gate_reject"
+      ],
+      "description": "6 类介入原因：死循环 / 停滞 / 跑题 / 预算逼近 / 输出门通过 / 输出门拒绝"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "业务化中文发言；严禁出现 next-speaker 命令式语义"
+    },
+    "hint_agent": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ],
+      "default": null,
+      "description": "可选暗示某 agent 接话；agent 仍可不接（P1 字段就位，P3 行为实装）"
+    }
+  }
+}
