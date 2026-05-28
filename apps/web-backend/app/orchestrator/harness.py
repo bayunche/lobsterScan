@@ -29,7 +29,12 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
+
+from .ids import MessageIdRegistry
+
+if TYPE_CHECKING:
+    from .events_v2 import V2EventBase
 
 log = logging.getLogger("orchestrator.harness")
 
@@ -98,6 +103,9 @@ class HarnessState:
     chain: list[str] = field(default_factory=list)
     done: asyncio.Future | None = None
     events_jsonl_path: Path | None = None
+    # v2 群聊 harness 字段(P1, spec 001-v2-chat-protocol-state)。默认 False, v1 路径行为不变。
+    is_v2: bool = False
+    message_id_registry: MessageIdRegistry = field(default_factory=MessageIdRegistry)
 
     async def emit(self, kind: str, agent_id: str,
                    step_key: str | None = None,
@@ -114,6 +122,49 @@ class HarnessState:
             except Exception as e:  # noqa: BLE001
                 log.warning("events.jsonl write failed: %s", e)
         await self.bus.emit(ev)
+
+    async def emit_v2(self, event: "V2EventBase") -> None:
+        """v2 群聊事件 emit(P1, spec 001-v2-chat-protocol-state)。
+
+        关键不变量:
+          - self.is_v2=False(v1 路径)时立即 return,零开销
+          - message_id 重复 → 降级写一条 agent.failed(FR-005 / FR-020),不抛
+          - schema 由 Pydantic 在构造 event 时已校验,这里不再二次校验
+          - 写入 events.jsonl 用 model_dump(mode="json")(扁平 dict,与 v1 行格式兼容)
+        """
+        if not self.is_v2:
+            return  # v1 路径短路 — 不动 events.jsonl 也不发总线
+
+        # message_id 去重
+        if not self.message_id_registry.add_or_reject(event.message_id):
+            log.warning("duplicate v2 message_id rejected: %s (msg_type=%s)",
+                        event.message_id, event.msg_type)
+            await self.emit("agent.failed", "coordinator", None, {
+                "error": f"duplicate v2 message_id: {event.message_id}",
+                "msg_type": event.msg_type,
+            })
+            return
+
+        row = event.model_dump(mode="json", by_alias=True)
+        # 写 events.jsonl(v1 行带 kind,v2 行带 msg_type,replay 工具靠这两个字段区分)
+        if self.events_jsonl_path:
+            try:
+                self.events_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.events_jsonl_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            except Exception as e:  # noqa: BLE001
+                # 降级:写入失败仅 warn,不影响任务(FR-020)
+                log.warning("events.jsonl v2 write failed: %s", e)
+
+        # 投到 EventBus(让 wildcard / kind 订阅都能看到;kind 用 msg_type 命名空间)
+        agent_id = ""
+        if hasattr(event, "from_"):
+            agent_id = getattr(event, "from_") or ""
+        elif hasattr(event, "producer"):
+            agent_id = getattr(event, "producer") or ""
+        await self.bus.emit(AgentEvent(
+            kind=event.msg_type, agent_id=agent_id, step_key=None, payload=row,
+        ))
 
 
 # ───────────────────────────── Worker ─────────────────────────────
@@ -427,6 +478,7 @@ async def run_harness(
     events_jsonl_path: Path | None,
     agent_display: dict[str, str] | None = None,  # agent_id → 显示名(pipeline.AGENT_DISPLAY)
     timeout_sec: int = 3600 * 2,
+    is_v2: bool = False,  # v2 群聊 harness flag(P1); 默认 False 保 v1 路径行为不变
 ) -> dict:
     """跑一次完整 task 的 harness 主入口。返回最终 stats / chain / events 数量。
 
@@ -438,6 +490,7 @@ async def run_harness(
     state = HarnessState(
         run=run, prev=prev, by_key=by_key, bus=bus,
         events_jsonl_path=events_jsonl_path,
+        is_v2=is_v2,  # v2 群聊 harness flag(P1)
     )
     state.done = asyncio.get_running_loop().create_future()
 
@@ -481,4 +534,8 @@ async def run_harness(
         "chain": state.chain,
         "visited": state.visited,
         "events_count": len(state.events_log),
+        # P1 v2(spec 001-v2-chat-protocol-state): 暴露 state 给 pipeline.execute()
+        # 做收尾期 v2 emit / artifact 版本化(参见 _emit_v2_finalization)。
+        # 仅内部使用,不要在 admin/API response 中外露。
+        "_state": state,
     }

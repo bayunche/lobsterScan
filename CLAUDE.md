@@ -175,6 +175,17 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Active spec-driven feature: **P1 — v2 群聊协议 + 状态模型层** ✅ Implemented
+- Plan:       `specs/001-v2-chat-protocol-state/plan.md`
+- Spec:       `specs/001-v2-chat-protocol-state/spec.md`
+- Research:   `specs/001-v2-chat-protocol-state/research.md`
+- Data model: `specs/001-v2-chat-protocol-state/data-model.md`
+- Contracts:  `specs/001-v2-chat-protocol-state/contracts/`
+- Quickstart: `specs/001-v2-chat-protocol-state/quickstart.md`
+- Tasks:      `specs/001-v2-chat-protocol-state/tasks.md`
+- Constitution: `.specify/memory/constitution.md`
+Code: `apps/web-backend/app/orchestrator/{events_v2,artifacts_v2,ids,replay_check}.py`
+      + `TaskRun.harness_version` / `HarnessState.is_v2` / `HarnessState.emit_v2()`
+Tests: `apps/web-backend/tests/orchestrator/*` (29 passed / 3 skipped)
+For overall v2 roadmap (P1–P8) see `docs/开发文档.md` §9.4.
 <!-- SPECKIT END -->

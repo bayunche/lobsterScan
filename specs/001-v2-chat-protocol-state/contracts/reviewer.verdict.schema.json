@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lobsterScan.local/v2/reviewer.verdict.schema.json",
+  "title": "ReviewerVerdict",
+  "description": "v2 审校结论事件 · 质量 + 流程逻辑双轨。Reviewer 不直接 mention 别的 agent；fail 时通过 suggested_fix_agent 给 Coordinator 转写线索（红线，宪章原则 IV）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["msg_type", "message_id", "task_id", "ts", "verdict", "dimension", "suggestions"],
+  "properties": {
+    "msg_type": { "const": "reviewer.verdict" },
+    "message_id": { "type": "string", "pattern": "^msg_[a-f0-9]{8}$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "number" },
+    "verdict": { "type": "string", "enum": ["pass", "fail"] },
+    "dimension": {
+      "type": "string",
+      "enum": ["quality", "process_logic", "both"]
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Finding" },
+      "default": []
+    },
+    "suggested_fix_agent": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ],
+      "default": null,
+      "description": "fail 时建议哪个 agent 接手修复；pass 时为 null。Coordinator 转写为 mention，Reviewer 不直接 @"
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 3,
+      "description": "≥3 条改进建议（业务化中文，pass 也给，用于 refine chips）"
+    }
+  },
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "what"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["high", "med", "low"] },
+        "what": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "where": {
+          "type": "string",
+          "maxLength": 80,
+          "default": "",
+          "description": "定位字符串，例：'Script@v3' / 'Outline@v2.chapter[1]'"
+        }
+      }
+    }
+  }
+}
