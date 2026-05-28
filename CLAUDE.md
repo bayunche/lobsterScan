@@ -175,17 +175,20 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P1 — v2 群聊协议 + 状态模型层** ✅ Implemented
-- Plan:       `specs/001-v2-chat-protocol-state/plan.md`
-- Spec:       `specs/001-v2-chat-protocol-state/spec.md`
-- Research:   `specs/001-v2-chat-protocol-state/research.md`
-- Data model: `specs/001-v2-chat-protocol-state/data-model.md`
-- Contracts:  `specs/001-v2-chat-protocol-state/contracts/`
-- Quickstart: `specs/001-v2-chat-protocol-state/quickstart.md`
-- Tasks:      `specs/001-v2-chat-protocol-state/tasks.md`
+Active spec-driven feature: **P2 — Worker 订阅化 + decide-to-speak 闸门** (planning)
+- Plan:       `specs/002-worker-subscription/plan.md`
+- Spec:       `specs/002-worker-subscription/spec.md`
+- Research:   `specs/002-worker-subscription/research.md` (8 decisions, incl. chat-overlay scoping)
+- Data model: `specs/002-worker-subscription/data-model.md`
+- Quickstart: `specs/002-worker-subscription/quickstart.md`
+- (contracts/ skipped — P2 is internal architecture, no new external APIs)
 - Constitution: `.specify/memory/constitution.md`
-Code: `apps/web-backend/app/orchestrator/{events_v2,artifacts_v2,ids,replay_check}.py`
-      + `TaskRun.harness_version` / `HarnessState.is_v2` / `HarnessState.emit_v2()`
-Tests: `apps/web-backend/tests/orchestrator/*` (29 passed / 3 skipped)
+
+Previously shipped (still authoritative for code):
+- **P1 v2 protocol + state model** ✅ Implemented — `specs/001-v2-chat-protocol-state/`
+  Code: `apps/web-backend/app/orchestrator/{events_v2,artifacts_v2,ids,replay_check}.py`
+        + `TaskRun.harness_version` / `HarnessState.is_v2` / `HarnessState.emit_v2()`
+  Tests: `apps/web-backend/tests/orchestrator/*` (29 passed / 3 skipped)
+
 For overall v2 roadmap (P1–P8) see `docs/开发文档.md` §9.4.
 <!-- SPECKIT END -->
