@@ -6,6 +6,26 @@ V0 接入方式：用 `openclaw agent` CLI subprocess 触发 turn（embedded mod
 后续可升级到 WebSocket Channel Plugin 持久连 Gateway。
 """
 
+# Windows 上 asyncio SelectorEventLoop 不支持 subprocess(NotImplementedError),
+# OpenClaw agent CLI 调用全部挂掉。在模块导入期把 policy 切回 ProactorEventLoop
+# (Python 3.8+ Windows 默认),保证在 plain `uvicorn` / 其他 ASGI runner / pytest 下
+# subprocess 可用。非 Windows 平台 no-op。
+#
+# 已知局限:uvicorn `--reload` 模式下,uvicorn 强制 `use_subprocess=True`,
+# `uvicorn/loops/asyncio.py` 又把它映射回 SelectorEventLoop,**会覆盖此 policy**。
+# 因此 Windows + `--reload` + 真实 LLM 任务的组合仍不可用 — 必须改 scripts/dev.sh
+# 去掉 --reload(代价:代码改动后手动 restart;但能跑真任务)。详 specs/002-worker-subscription
+# T040 阻塞汇报。
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    _policy_cls = getattr(asyncio, "WindowsProactorEventLoopPolicy", None)
+    if _policy_cls is not None and not isinstance(
+        asyncio.get_event_loop_policy(), _policy_cls,
+    ):
+        asyncio.set_event_loop_policy(_policy_cls())
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
