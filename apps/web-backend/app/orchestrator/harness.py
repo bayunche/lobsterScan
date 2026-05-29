@@ -183,6 +183,15 @@ class HarnessState:
             kind=event.msg_type, agent_id=agent_id, step_key=None, payload=row,
         ))
 
+        # P2 (T027, spec 002-worker-subscription):末尾按 interests 分发到 worker inbox。
+        # is_v2=False 时 subscriptions is None,本分支不进;v1 路径零开销红线(FR-003)。
+        # dispatch 内部已 try/except;此处再外包一层 FR-016 防御。
+        if self.subscriptions is not None:
+            try:
+                self.subscriptions.dispatch(event)
+            except Exception as e:  # noqa: BLE001 — FR-016 降级
+                log.warning("v2 subscription dispatch crash: %s", e)
+
 
 # ───────────────────────────── Worker ─────────────────────────────
 
@@ -219,8 +228,192 @@ class AgentWorker:
         self.inbox: asyncio.Queue["V2EventBase"] | None = None
         self._consume_task: asyncio.Task | None = None
 
+    # ── P2 v2 订阅消费(T025, spec 002-worker-subscription) ──
+    # 三件套:start_v2_consumer / enqueue_v2 / _consume_loop
+    # 只在 is_v2=True 且 agent 有 interests 时由 run_harness 启动;
+    # v1 路径下永远不调用,inbox / _consume_task 保持 None。
+
+    def start_v2_consumer(self) -> None:
+        """启动 v2 inbox 与 consume_loop;幂等(已启动则跳过)。"""
+        if self.inbox is not None:
+            return
+        # 延迟 import 避免循环 + 让 v1 路径完全不付代价
+        from .subscription import V2_INBOX_MAX
+        self.inbox = asyncio.Queue(maxsize=V2_INBOX_MAX)
+        self._consume_task = asyncio.create_task(self._consume_loop())
+
+    def enqueue_v2(self, event: "V2EventBase") -> bool:
+        """SubscriptionRegistry.dispatch 调;返回是否入队成功。
+
+        FR-017:inbox 满 → 丢最老 + 放新 + log warn;不抛错。
+        v1 路径(inbox is None)→ 返回 False(短路守护)。
+        """
+        if self.inbox is None:
+            return False
+        try:
+            self.inbox.put_nowait(event)
+            return True
+        except asyncio.QueueFull:
+            try:
+                self.inbox.get_nowait()  # 丢最老
+                self.inbox.put_nowait(event)
+                log.warning(
+                    "worker %s inbox 满(>= %d),丢弃最老事件",
+                    self.agent_id, self.inbox.maxsize,
+                )
+                return True
+            except Exception as e:  # noqa: BLE001 — FR-016 极端兜底
+                log.warning("worker %s enqueue_v2 失败: %s", self.agent_id, e)
+                return False
+
+    async def _consume_loop(self) -> None:
+        """死循环消费 inbox;handle_v2_event 异常仅 log warn(FR-016)。
+
+        任务结束时由 run_harness cancel + await(详 research §F6)。
+        """
+        if self.inbox is None:
+            return
+        try:
+            while True:
+                event = await self.inbox.get()
+                try:
+                    await self.handle_v2_event(event)
+                except Exception as e:  # noqa: BLE001 — FR-016
+                    log.warning(
+                        "worker %s · handle_v2_event 失败(msg_type=%s): %s",
+                        self.agent_id, getattr(event, "msg_type", "?"), e,
+                    )
+        except asyncio.CancelledError:
+            return
+
+    async def handle_v2_event(self, event: "V2EventBase") -> None:
+        """订阅触发的 chat overlay 路径(T026, research §0 + data-model §10)。
+
+        流程:profile 查询 → 计算 available_artifacts → decide_to_speak 闸门 →
+              IGNORE 仅 log;SPEAK emit AgentSpeak;SILENT emit AgentSilent。
+
+        **不调 _run_step**(red line: Coordinator 路径仍是 LLM 工作唯一驱动)。
+        per-agent lock 包裹由 T034(Phase 5 US3)落地。
+        """
+        from .artifacts_v2 import next_version
+        from .events_v2 import CORE_ARTIFACTS, AgentSilent, AgentSpeak
+        from .subscription import DecisionResult, decide_to_speak
+
+        st = self.state
+        if st.subscriptions is None or st.run is None:
+            return  # 防御:v1 路径或运行时缺 run 时 no-op
+
+        profile = st.subscriptions.profiles.get(self.agent_id)
+        if profile is None:
+            return  # 未注册的 agent(如 coordinator)— 跳过
+
+        # 当前任务已有 artifact 版本表(version >= 1 即有效;next_version 是"下一个")
+        task_id = getattr(st.run, "task_id", "") or ""
+        available: dict[str, int] = {}
+        for art_id in CORE_ARTIFACTS:
+            try:
+                v = next_version(task_id, art_id) - 1
+                if v >= 1:
+                    available[art_id] = v
+            except Exception:  # noqa: BLE001 — FR-016 降级
+                pass
+
+        decision, reason = decide_to_speak(
+            event=event, agent_id=self.agent_id, profile=profile,
+            mention_counter=st.subscriptions.mention_counter,
+            reply_to_registry=st.subscriptions.reply_to_registry,
+            available_artifacts=available,
+        )
+
+        if decision == DecisionResult.IGNORE:
+            log.debug(
+                "subscription IGNORE %s on msg_id=%s: %s",
+                self.agent_id, getattr(event, "message_id", "?"), reason,
+            )
+            return  # FR-007:IGNORE 不写 events.jsonl
+
+        msg_id = getattr(event, "message_id", None)
+
+        # T034 (Phase 5 US3) · per-agent lock(FR-008/009/012):
+        # 防止同 agent 并发跑(宪章 V:OpenClaw agentDir 不共享)。
+        # **每次都重新读 V2_LOCK_WAIT_SEC 以支持测试 monkeypatch**。
+        from .subscription import V2_LOCK_WAIT_SEC as _wait_sec
+        from . import subscription as _sub
+        wait_sec = getattr(_sub, "V2_LOCK_WAIT_SEC", _wait_sec)
+
+        lock = st.get_agent_lock(self.agent_id)
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=wait_sec)
+        except asyncio.TimeoutError:
+            # FR-009:锁等待超时降级为 silent;不抛错,不挂任务
+            log.warning(
+                "worker %s lock wait %.2fs timeout — degrade to silent",
+                self.agent_id, wait_sec,
+            )
+            try:
+                await st.emit_v2(AgentSilent(
+                    task_id=task_id, **{"from": self.agent_id},
+                    reply_to=msg_id, reason="锁等待超时",
+                ))
+            except Exception as e:  # noqa: BLE001 — FR-016 极端兜底
+                log.warning("subscription silent (timeout) emit crash: %s", e)
+            return
+
+        try:
+            # SPEAK / SILENT 共同后续:bump 计数 + 标记 reply_to + emit v2 事件
+            st.subscriptions.mention_counter.bump(self.agent_id)
+            st.subscriptions.reply_to_registry.mark(self.agent_id, msg_id)
+
+            if decision == DecisionResult.SPEAK:
+                await st.emit_v2(AgentSpeak(
+                    task_id=task_id, **{"from": self.agent_id},
+                    text=f"收到 — {reason}"[:4000],
+                    reply_to=msg_id,
+                    intent="confirm",
+                    mentions=[], cc=[], artifact_updates=[],
+                ))
+            else:  # SILENT
+                await st.emit_v2(AgentSilent(
+                    task_id=task_id, **{"from": self.agent_id},
+                    reply_to=msg_id,
+                    reason=reason[:30],
+                ))
+        finally:
+            lock.release()
+
     async def run(self) -> None:
         """被 Coordinator dispatch — 跑一次 step。"""
+        st = self.state
+
+        # T035 · P2 v2 路径下,Coordinator 派单也走 per-agent lock(FR-012)。
+        # 与 subscription 触发 handle_v2_event 共用同一把锁 — 守住宪章 V:
+        # OpenClaw agentDir 不允许并发占用。
+        # v1 路径(is_v2=False)完全短路,保持 main 行为(FR-013)。
+        # 锁超时(罕见 — 例如 v2 subscription 占着不放)降级为 log warn +
+        # 继续无锁跑,任务不挂(FR-016)。
+        lock_token: asyncio.Lock | None = None
+        if st.is_v2:
+            from . import subscription as _sub
+            wait_sec = getattr(_sub, "V2_LOCK_WAIT_SEC", 60)
+            lock = st.get_agent_lock(self.agent_id)
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=wait_sec)
+                lock_token = lock
+            except asyncio.TimeoutError:
+                log.warning(
+                    "v2 Coordinator path · worker %s lock wait %.2fs timeout — proceed unlocked",
+                    self.agent_id, wait_sec,
+                )
+                # 不 return — 继续无锁跑(v1 兜底语义,任务优先于隔离)
+
+        try:
+            await self._run_unlocked()
+        finally:
+            if lock_token is not None:
+                lock_token.release()
+
+    async def _run_unlocked(self) -> None:
+        """run() 主体 — 被 lock 包装层调用(若 is_v2 且 lock 拿到)。"""
         st = self.state
         s = st.by_key.get(self.step_key)
         if s is None:
@@ -274,6 +467,21 @@ class AgentWorker:
         handoff = out.get("handoff") or {}
         if not isinstance(handoff, dict):
             handoff = {}
+
+        # P2 v2 chat overlay (T029, research §F1):
+        # 任务进行中 emit AgentSpeak + ArtifactUpdate,让 subscription 链路能在
+        # 每个 step 后真正触发下游 worker(不再只在收尾期 emit)。
+        # 守红线:is_v2=False 时 pipeline 内部第一行短路;v1 路径零开销。
+        if st.is_v2:
+            try:
+                from .pipeline import _emit_v2_step_overlay  # lazy 避免循环
+                await _emit_v2_step_overlay(st, st.run, s, handoff, self.agent_id)
+            except Exception as e:  # noqa: BLE001 — FR-016 / FR-020 降级
+                log.warning(
+                    "v2 per-step overlay failed for %s/%s: %s",
+                    self.agent_id, self.step_key, e,
+                )
+
         await st.emit("agent.handoff", self.agent_id, self.step_key, {
             "to": (handoff.get("to") or "").strip(),
             "reason": (handoff.get("reason") or "").strip(),
@@ -535,6 +743,19 @@ async def run_harness(
         chat_publisher=chat_publisher,
     )
 
+    # P2 (T028, spec 002-worker-subscription):仅 v2 路径下构造订阅注册表
+    # 并启动每个有 interests 的 worker 的 consume_loop。
+    # v1 路径下本段完全跳过 — state.subscriptions 保持 None,worker.inbox 保持 None。
+    if is_v2:
+        from .subscription import SubscriptionRegistry, WORKER_PROFILE
+        state.subscriptions = SubscriptionRegistry()
+        for agent_id, worker in workers.items():
+            profile = WORKER_PROFILE.get(agent_id)
+            if profile is None or not profile.interests:
+                continue  # 未在静态表里 / 无 interests(如 coordinator)— 跳过
+            state.subscriptions.register(agent_id, worker, profile)
+            worker.start_v2_consumer()
+
     await state.emit("task.start", "coordinator", None,
                      {"steps": [k for k, *_ in steps_meta]})
 
@@ -551,6 +772,18 @@ async def run_harness(
     except asyncio.TimeoutError:
         log.warning("harness · overall timeout after %ds", timeout_sec)
         result_reason = "overall_timeout"
+
+    # P2 (T028, research §F6):任务结束清理 v2 consume_loop task,避免泄漏。
+    # v1 路径下 _consume_task 都是 None,本段空跑;cancel 异常容错。
+    if is_v2:
+        for worker in workers.values():
+            t = worker._consume_task
+            if t is not None and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
 
     return {
         "reason": result_reason,

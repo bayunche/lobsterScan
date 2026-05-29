@@ -51,6 +51,7 @@ __all__ = [
     "MentionCounter",
     "ReplyToRegistry",
     "SubscriptionRegistry",
+    "decide_to_speak",
 ]
 
 
@@ -255,10 +256,64 @@ class SubscriptionRegistry:
         self.profiles[agent_id] = profile
 
     def dispatch(self, event: V2EventBase) -> int:
-        """同步分发;返回成功入队的 worker 数。
+        """同步分发;返回成功入队的 worker 数(T024)。
 
-        **占位实现(T009 阶段)** — 完整 dispatch 由 Phase 4 US2 的 T024 落地:
-        遍历 profiles → any-of 谓词 → worker.enqueue_v2(event)。
-        当前空实现让 emit_v2 末尾的 hook(T027)即便提前接入也不会报错。
+        对每个注册 worker 跑 any-of 谓词;命中即 worker.enqueue_v2(event)。
+        谓词异常按 FR-016 降级 — 仅 log.warning,不抛错,不影响其他 worker。
         """
-        return 0
+        delivered = 0
+        for agent_id, profile in self.profiles.items():
+            try:
+                if any(p(event, agent_id) for p in profile.interests):
+                    worker = self.workers.get(agent_id)
+                    if worker is not None and worker.enqueue_v2(event):
+                        delivered += 1
+            except Exception as e:  # noqa: BLE001 — FR-016 降级
+                log.warning(
+                    "subscription dispatch crash for %s on msg_type=%s: %s",
+                    agent_id, getattr(event, "msg_type", "?"), e,
+                )
+        return delivered
+
+
+# ────────────────────────────── decide-to-speak 闸门 ──────────────────────────────
+# T023 · spec FR-005/006 4 条规则;纯函数便于单测
+
+
+def decide_to_speak(
+    *,
+    event: V2EventBase,
+    agent_id: str,
+    profile: WorkerProfile,
+    mention_counter: MentionCounter,
+    reply_to_registry: ReplyToRegistry,
+    available_artifacts: dict[str, int],
+    mention_limit: int = V2_MENTION_LIMIT,
+) -> tuple[DecisionResult, str]:
+    """decide-to-speak 闸门(spec FR-005/006)。
+
+    规则按优先级判定;返回 (decision, reason_or_text_seed)。
+
+    1. 若 worker 已对**同一 reply_to** 响应过 → IGNORE
+    2. 若 worker 当前任务被 @ 次数 ≥ mention_limit → IGNORE(防 flap)
+    3. 若 profile.requires 全部满足(每个 artifact_id 都 ∈ available_artifacts)→ SPEAK
+    4. 否则(有 require 缺失)→ SILENT(reason 含缺失 artifact 列表)
+
+    **纯函数特性**:所有依赖经参数传入,无 IO / 无 LLM / 无副作用;
+    便于单测直接 (decision, reason) 断言(不需要 mock state / async)。
+    """
+    # 1. reply_to dedup 优先于其他规则(避免双重 IGNORE 计数失真)
+    reply_to = getattr(event, "reply_to", None)
+    if reply_to_registry.has_responded(agent_id, reply_to):
+        return DecisionResult.IGNORE, f"已响应同一 reply_to={reply_to}"
+
+    # 2. 防 flap
+    if mention_counter.get(agent_id) >= mention_limit:
+        return DecisionResult.IGNORE, f"被 @ 次数已达 {mention_limit}"
+
+    # 3 / 4. requires 检查
+    missing = [a for a in profile.requires if a not in available_artifacts]
+    if missing:
+        return DecisionResult.SILENT, f"等 {' / '.join(missing)} 先就绪"
+
+    return DecisionResult.SPEAK, "依赖齐全,准备发言"

@@ -175,14 +175,23 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P2 — Worker 订阅化 + decide-to-speak 闸门** (planning)
+Active spec-driven feature: **P2 — Worker 订阅化 + decide-to-speak 闸门** ✅ Implemented
 - Plan:       `specs/002-worker-subscription/plan.md`
 - Spec:       `specs/002-worker-subscription/spec.md`
 - Research:   `specs/002-worker-subscription/research.md` (8 decisions, incl. chat-overlay scoping)
 - Data model: `specs/002-worker-subscription/data-model.md`
 - Quickstart: `specs/002-worker-subscription/quickstart.md`
+- Tasks:      `specs/002-worker-subscription/tasks.md` (39/41 done;T038 v1 baseline diff + T040 demo curl 需人工跑真 LLM 管线)
 - (contracts/ skipped — P2 is internal architecture, no new external APIs)
 - Constitution: `.specify/memory/constitution.md`
+Code: `apps/web-backend/app/orchestrator/subscription.py` (新模块 ~310 行;9 agent `WORKER_PROFILE`
+      + Predicate helpers + `DecisionResult` + `decide_to_speak` 纯函数 + `SubscriptionRegistry`)
+      + `harness.py` 扩(`HarnessState.{subscriptions,agent_locks,get_agent_lock}` +
+      `AgentWorker.{inbox,_consume_loop,enqueue_v2,handle_v2_event}` + run() per-agent lock 包裹 +
+      `emit_v2` 末尾 dispatch + `run_harness` v2 分支构造 + 末尾 consume_task 清理)
+      + `pipeline.py` `_emit_v2_step_overlay` per-step chat overlay hook(write_versioned + AgentSpeak)
+Tests: `apps/web-backend/tests/orchestrator/*` (61 passed in 1.51s;P1 baseline 32 + US1 4 +
+       US2 19 + US3 6;v1 路径**字段级零回归**红线由 US1 T012-T015 守护)
 
 Previously shipped (still authoritative for code):
 - **P1 v2 protocol + state model** ✅ Implemented — `specs/001-v2-chat-protocol-state/`

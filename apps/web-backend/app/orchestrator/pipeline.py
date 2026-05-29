@@ -1745,6 +1745,88 @@ def _persist_final(run: TaskRun) -> None:
     )
 
 
+async def _emit_v2_step_overlay(
+    state: Any,
+    run: "TaskRun",
+    step: Any,
+    handoff: dict,
+    producer_agent_id: str,
+) -> None:
+    """T029 · spec 002-worker-subscription · per-step v2 chat overlay。
+
+    每个 step success 后由 AgentWorker.run() 调用(harness 已守 is_v2=True 红线)。
+    职责:让 subscription 链路在任务进行中有事件可订阅(详 research.md §F1)。
+
+    流程:
+      1) 若 step 对应 4 核心 artifact(material_parsing/point_extraction/structure_building/
+         copywriting),write_versioned 写一份带版本号副本 + emit ArtifactUpdate
+         → 下游订阅 artifact_id_in 的 worker 被唤醒
+      2) emit AgentSpeak(text=步骤摘要, mentions=[handoff.to], intent="propose")
+         → 下游订阅 mention_includes 的 worker 被唤醒
+
+    宪章 III(降级):任何 emit / 写入异常仅 log warn,不影响 step.success 流程。
+    """
+    if step.status != "success":
+        return
+
+    from .artifacts_v2 import write_versioned
+    from .events_v2 import AgentSpeak
+
+    # 4 核心 artifact 抽取:step → (artifact_id, producer, json→payload)
+    artifact_extract = {
+        "material_parsing":    ("MaterialPool", "material",        lambda j: j),
+        "point_extraction":    ("ReportCore",   "point-extractor", lambda j: j),
+        "structure_building":  ("Outline",      "structure",       lambda j: j),
+        "copywriting":         ("Script",       "copywriter",      lambda j: j.get("script_md") or ""),
+    }
+
+    # ① 若 step 对应核心 artifact → write_versioned(内部已 emit ArtifactUpdate)
+    if step.step in artifact_extract:
+        artifact_id, producer, extractor = artifact_extract[step.step]
+        try:
+            payload = extractor(step.output_json or {})
+            if payload:
+                await write_versioned(
+                    state=state, artifact_id=artifact_id, payload=payload,
+                    producer=producer, base_version=None,
+                    delta_summary=f"{step.step} 产物 by {producer}",
+                )
+        except Exception as e:  # noqa: BLE001 — FR-020 降级
+            log.warning("v2 per-step write_versioned %s failed: %s", artifact_id, e)
+
+    # ② emit AgentSpeak — 让 mention 链路驱动订阅
+    try:
+        # mentions = handoff.to(若它是已知的 agent;否则按默认链 fallback)
+        to_raw = (handoff.get("to") or "").strip()
+        mentions: list[str] = []
+        if to_raw and to_raw not in ("DONE", "coordinator"):
+            mentions = [to_raw]
+        elif step.step in DEFAULT_NEXT_STEP:
+            next_step = DEFAULT_NEXT_STEP[step.step]
+            if next_step != "DONE":
+                next_agent = STEP_TO_AGENT.get(next_step, "")
+                if next_agent:
+                    mentions = [next_agent]
+
+        # text: 复用 _summarize_output;若空降级为 step 显示名
+        text = _summarize_output(
+            step.step, step.output_json, step.output_text or "",
+        ) or f"{STEP_TO_AGENT.get(step.step, producer_agent_id)} 完成"
+        # 任何 step 都是 propose 语气(进行中接力),与收尾期的 confirm 区分
+        await state.emit_v2(AgentSpeak(
+            task_id=run.task_id, **{"from": producer_agent_id},
+            text=text[:4000],
+            mentions=mentions, cc=[], reply_to=None,
+            intent="propose",
+            artifact_updates=[],
+        ))
+    except Exception as e:  # noqa: BLE001 — FR-020 降级
+        log.warning(
+            "v2 per-step AgentSpeak failed for %s/%s: %s",
+            producer_agent_id, step.step, e,
+        )
+
+
 async def _emit_v2_finalization(state: Any, run: TaskRun) -> None:
     """P1 v2(spec 001-v2-chat-protocol-state)收尾期 v2 emit + 4 核心 artifact 版本化。
 
