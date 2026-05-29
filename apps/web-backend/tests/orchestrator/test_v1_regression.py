@@ -131,3 +131,139 @@ async def test_duplicate_message_id_rejected(tmp_outputs_dir):
     rows = [json.loads(l) for l in events.read_text(encoding="utf-8").strip().splitlines() if l]
     assert len(rows) == 1, f"重复 message_id 应只写一条,实际 {len(rows)}"
     assert rows[0]["text"] == "a"
+
+
+# ────────────────────────────── P2 v1 零回归 ──────────────────────────────
+# T012-T015 · spec 002-worker-subscription · US1 P1 红线护栏
+#
+# 这 4 个 case 锁住 P2 新字段在 v1 路径下永远是 None / 空 dict;后续 Phase 4 T028
+# 会让 is_v2=True 时分配这些字段,但 v1 路径必须永远短路保持原行为(FR-003 / FR-013)。
+
+from app.orchestrator.harness import AgentWorker, EventBus, HarnessState
+from app.orchestrator.subscription import SubscriptionRegistry
+
+
+def _make_state(is_v2: bool) -> HarnessState:
+    """构造一个最小的真实 HarnessState(不起 done future,不跑 run_harness)。"""
+    return HarnessState(
+        run=type("R", (), {"task_id": "tsk_test"})(),
+        prev={}, by_key={}, bus=EventBus(),
+        is_v2=is_v2,
+    )
+
+
+def _make_worker(state: HarnessState, agent_id: str = "material") -> AgentWorker:
+    async def _noop_run_step(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+    return AgentWorker(
+        agent_id=agent_id, step_key=agent_id, state=state,
+        run_step_fn=_noop_run_step, gate_review_fn=None,
+    )
+
+
+def test_v1_state_subscriptions_is_none_and_locks_empty():
+    """T012 [US1] · v1 路径下 state.subscriptions is None 且 agent_locks 是空 dict。
+
+    若 Phase 4 T028 误在 v1 路径下分配 SubscriptionRegistry,本 case 会失败。
+    """
+    state = _make_state(is_v2=False)
+
+    assert state.subscriptions is None, (
+        "v1 路径 state.subscriptions 必须为 None(FR-003 零开销红线)"
+    )
+    assert state.agent_locks == {}, (
+        "v1 路径 state.agent_locks 必须为空 dict(只在 v2 路径下 lazy-init)"
+    )
+
+
+def test_v1_worker_inbox_and_consume_task_default_none():
+    """T013 [US1] · v1 路径下 AgentWorker.inbox 与 _consume_task 默认 None。
+
+    若 Phase 4 T025 误在 v1 路径下调 start_v2_consumer(),本 case 会失败。
+    """
+    state = _make_state(is_v2=False)
+    worker = _make_worker(state)
+
+    assert worker.inbox is None, "v1 路径 worker.inbox 必须为 None"
+    assert worker._consume_task is None, "v1 路径 worker._consume_task 必须为 None"
+
+
+async def test_v1_events_jsonl_contains_no_msg_type_field(tmp_outputs_dir):
+    """T014 [US1] · v1 emit 写入的 events.jsonl 不含任何 msg_type 字段(SC-001)。
+
+    v1 行使用 kind 字段(AgentEvent.to_dict);v2 行才有 msg_type。
+    若 P2 内部错把 v2 emit 路径误用到 v1,grep "msg_type" 会命中。
+    """
+    events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_v1_grep" / "events.jsonl"
+    state = HarnessState(
+        run=type("R", (), {"task_id": "tsk_v1_grep"})(),
+        prev={}, by_key={}, bus=EventBus(),
+        is_v2=False,
+        events_jsonl_path=events_path,
+    )
+
+    # 1) v1 emit 一些事件
+    await state.emit("task.start", "coordinator", None, {"steps": ["a", "b"]})
+    await state.emit("agent.start", "material", "material", {"visit_no": 1})
+    await state.emit("agent.done", "material", "material", {"tokens": 100})
+
+    # 2) v1 路径下即便调 emit_v2 也不应写入(短路守护,T015 重点验证)
+    await state.emit_v2(
+        AgentSpeak(task_id="tsk_v1_grep", **{"from": "material"},
+                   text="should-not-appear", intent="propose")
+    )
+
+    # 3) 校验
+    assert events_path.is_file(), "v1 emit 应写 events.jsonl"
+    raw = events_path.read_text(encoding="utf-8")
+    assert '"msg_type"' not in raw, (
+        f"v1 路径 events.jsonl 不应含 msg_type 字段;实际内容:\n{raw[:500]}"
+    )
+    # 校验 kind 字段存在(v1 协议)
+    assert '"kind"' in raw, "v1 路径 events.jsonl 应使用 kind 字段"
+
+
+async def test_v1_emit_v2_does_not_dispatch_to_subscriptions(tmp_outputs_dir):
+    """T015 [US1] · v1 路径下 emit_v2 不写盘 + 不发 bus + 即使误挂 SubscriptionRegistry 也不 dispatch。
+
+    模拟一个"v2 字段不小心被 P2 构造但 is_v2=False"的 corner case,
+    确认 emit_v2 的 short-circuit 守住红线,subscriptions.dispatch 不会被调用。
+    """
+    events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_v1_dispatch" / "events.jsonl"
+    state = HarnessState(
+        run=type("R", (), {"task_id": "tsk_v1_dispatch"})(),
+        prev={}, by_key={}, bus=EventBus(),
+        is_v2=False,
+        events_jsonl_path=events_path,
+    )
+
+    # 故意挂一个 spy registry — 即便它存在,v1 短路必须保证 dispatch 不被调用
+    dispatch_calls: list = []
+    spy_registry = SubscriptionRegistry()
+
+    def _spy_dispatch(event):
+        dispatch_calls.append(event)
+        return 0
+
+    spy_registry.dispatch = _spy_dispatch  # type: ignore[method-assign]
+    state.subscriptions = spy_registry
+
+    # 也挂个 bus emit 计数,确保 short-circuit 真生效
+    bus_calls: list = []
+
+    async def _bus_count(_ev):
+        bus_calls.append(_ev)
+
+    state.bus.on_any(_bus_count)
+
+    await state.emit_v2(
+        AgentSpeak(task_id="tsk_v1_dispatch", **{"from": "material"},
+                   text="ignored", intent="propose")
+    )
+
+    assert not events_path.exists(), "v1 路径 emit_v2 不应写 events.jsonl"
+    assert dispatch_calls == [], (
+        "v1 路径 emit_v2 必须在 dispatch 前 return("
+        "FR-003 + emit_v2 第一行 if not self.is_v2: return)"
+    )
+    assert bus_calls == [], "v1 路径 emit_v2 不应触达 bus.emit"

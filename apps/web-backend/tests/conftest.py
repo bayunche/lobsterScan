@@ -161,3 +161,33 @@ def stub_state():
     def _make(task_id: str, events_jsonl: Path | str, is_v2: bool = True) -> StubState:
         return StubState(task_id, events_jsonl, is_v2)
     return _make
+
+
+@pytest.fixture
+def stub_state_v2(stub_state):
+    """便利 fixture · P2 v2 路径单测：默认 is_v2=True 的 StubState 工厂。
+
+    用法：
+        def test_xxx(stub_state_v2, tmp_outputs_dir):
+            state = stub_state_v2("tsk_001", tmp_outputs_dir / "events.jsonl")
+            await state.emit_v2(some_event)
+            assert len(state.emitted) == 1
+    """
+    def _make(task_id: str, events_jsonl: Path | str) -> StubState:
+        return stub_state(task_id, events_jsonl, is_v2=True)
+    return _make
+
+
+@pytest.fixture
+def stub_state_v1(stub_state):
+    """便利 fixture · P2 v1 回归断言：默认 is_v2=False 的 StubState 工厂。
+
+    用法：
+        def test_xxx(stub_state_v1, tmp_outputs_dir):
+            state = stub_state_v1("tsk_001", tmp_outputs_dir / "events.jsonl")
+            await state.emit_v2(some_event)
+            assert state.emitted == []  # v1 短路,不写不发
+    """
+    def _make(task_id: str, events_jsonl: Path | str) -> StubState:
+        return stub_state(task_id, events_jsonl, is_v2=False)
+    return _make

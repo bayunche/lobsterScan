@@ -35,6 +35,7 @@ from .ids import MessageIdRegistry
 
 if TYPE_CHECKING:
     from .events_v2 import V2EventBase
+    from .subscription import SubscriptionRegistry
 
 log = logging.getLogger("orchestrator.harness")
 
@@ -106,6 +107,22 @@ class HarnessState:
     # v2 群聊 harness 字段(P1, spec 001-v2-chat-protocol-state)。默认 False, v1 路径行为不变。
     is_v2: bool = False
     message_id_registry: MessageIdRegistry = field(default_factory=MessageIdRegistry)
+    # P2 字段(spec 002-worker-subscription, T010)。
+    # 守红线:v1 路径下 subscriptions 永远 None;agent_locks 空 dict(get_agent_lock 不会被调)。
+    # is_v2=True 时由 run_harness 构造 SubscriptionRegistry 并注册 worker(Phase 4 T028)。
+    subscriptions: "SubscriptionRegistry | None" = None
+    agent_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+
+    def get_agent_lock(self, agent_id: str) -> asyncio.Lock:
+        """lazy-init per-agent Lock(spec FR-008;详 research.md §3)。
+
+        必须在**运行中的 event loop** 内调用(asyncio.Lock() 绑定当前 loop)。
+        任务级隔离:同 task 内 agent_id 相同 → 同一把锁;跨 task 不串扰
+        (每个 HarnessState 实例独立 agent_locks dict)。
+        """
+        if agent_id not in self.agent_locks:
+            self.agent_locks[agent_id] = asyncio.Lock()
+        return self.agent_locks[agent_id]
 
     async def emit(self, kind: str, agent_id: str,
                    step_key: str | None = None,
@@ -195,6 +212,12 @@ class AgentWorker:
         self.state = state
         self._run_step = run_step_fn
         self._gate_review = gate_review_fn
+        # P2 字段占位(spec 002-worker-subscription, T011)。
+        # is_v2=True 且 agent 有 interests 时,Phase 4 T025 的 start_v2_consumer()
+        # 会构造 inbox = asyncio.Queue(maxsize=V2_INBOX_MAX) 并起 _consume_loop task。
+        # v1 路径下永远保持 None,零开销(FR-003)。
+        self.inbox: asyncio.Queue["V2EventBase"] | None = None
+        self._consume_task: asyncio.Task | None = None
 
     async def run(self) -> None:
         """被 Coordinator dispatch — 跑一次 step。"""
