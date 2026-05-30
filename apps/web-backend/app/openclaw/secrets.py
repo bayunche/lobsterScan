@@ -58,6 +58,16 @@ AGENT_ENV_MAP: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# LLM provider 标准 env key — **所有 agent 都注入**(secret_key, env_name 同名)。
+# openclaw.json providers.<name>.apiKey 为空时,openclaw fallback 到这些 provider 标准
+# env var 读 key。管台配的 LLM provider key 经此注入 agent subprocess,否则 agent 跑
+# default provider(如 deepseek)时报 FailoverError(agentDir auth-profiles.json 无 key)。
+# ANTHROPIC 通常在 .env(web-backend env 继承),secrets 没有就跳过(下面 if v 守护)。
+LLM_PROVIDER_KEYS: list[str] = [
+    "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "DASHSCOPE_API_KEY", "GLM_API_KEY",
+]
+
 
 # gpt-image-2 skill Mode A 触发开关 — OPENAI_API_KEY 存在时强制打开。
 # 不在 KNOWN_KEYS 里(它不是 secret 而是行为开关),由后端自动推断。
@@ -134,12 +144,16 @@ def _resolve_minimax_key(all_secrets: dict[str, str]) -> tuple[str | None, str]:
 
 async def env_for_agent(agent_id: str) -> dict[str, str]:
     """返回该 agent subprocess 应该注入的环境变量字典."""
-    mapping = AGENT_ENV_MAP.get(agent_id, [])
-    # video-producer 即使 mapping 为空(因 MINIMAX_API_KEY 走动态路由)也要进
-    if not mapping and agent_id != "video-producer":
-        return {}
     all_secrets = await fetch_all()
     out: dict[str, str] = {}
+    # 1. LLM provider key — 所有 agent 注入(secrets 里存在的才注入)。
+    #    这让管台配的 deepseek/anthropic/openai 等 LLM key 真正到达 agent subprocess。
+    for k in LLM_PROVIDER_KEYS:
+        v = all_secrets.get(k)
+        if v:
+            out[k] = v
+    # 2. agent-specific skill key(video/image 等)
+    mapping = AGENT_ENV_MAP.get(agent_id, [])
     for secret_key, env_name in mapping:
         v = all_secrets.get(secret_key)
         if v:
