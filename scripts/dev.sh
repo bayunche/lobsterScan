@@ -44,8 +44,20 @@ else
 fi
 
 # 2. web-backend (FastAPI)
+# Fix B(Windows pipeline runnability):uvicorn --reload 在 worker 子进程里强制
+# SelectorEventLoop,而 Windows 上它不支持 subprocess(openclaw agent CLI 跑不通)。
+# Windows 下去掉 --reload,让 plain uvicorn 用 ProactorEventLoop(见 app/main.py policy)。
+# 代价:改 web-backend 代码需手动重启。admin-backend 不 fork subprocess,保留 --reload。
+# 详 docs/issues/windows-real-pipeline-runnability.md。
+WEB_RELOAD="--reload"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    WEB_RELOAD=""
+    echo "▸ Windows 检测到:web-backend 去 --reload(subprocess 需 ProactorEventLoop;改码请手动重启)"
+    ;;
+esac
 run web-backend uv run --directory apps/web-backend uvicorn app.main:app \
-  --host "$WEB_BACKEND_HOST" --port "$WEB_BACKEND_PORT" --reload
+  --host "$WEB_BACKEND_HOST" --port "$WEB_BACKEND_PORT" $WEB_RELOAD
 
 # 3. admin-backend
 run admin-backend uv run --directory apps/admin-backend uvicorn app.main:app \

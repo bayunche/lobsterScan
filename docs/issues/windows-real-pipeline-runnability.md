@@ -95,10 +95,55 @@ run web-backend uv run --directory apps/web-backend uvicorn app.main:app \
       与 **T040**(v2 demo:mentions → 自动响应链路在真任务里 emit)
 - [ ] 非 Windows 平台(Linux/WSL2/macOS)行为不回归
 
+## 进展(2026-05-30)— Fix A/B 已落地并验证;暴露第三障碍
+
+**Fix A + Fix B 已实施并验证有效**(分支 `fix/windows-pipeline-runnability`):
+
+- **Fix A**(`agent_backend.py`):`OpenClawSubprocessBackend._resolve_argv_prefix()` —— Windows 上
+  把 `node_modules/.bin/openclaw`(sh shim)替换为 `[node, node_modules/openclaw/openclaw.mjs]`。
+  验证:`argv_prefix = ['node.EXE', '...openclaw.mjs']`;openclaw subprocess **真启动了**(不再
+  `[WinError 193]`),node 执行到 `agent` 子命令。
+- **Fix B**(`scripts/dev.sh`):Windows(MINGW/MSYS)下 web-backend 去 `--reload`,plain uvicorn
+  用 ProactorEventLoop(配合 `main.py` policy);admin-backend 不 fork subprocess,保留 `--reload`。
+  验证:plain uvicorn 起 → ProactorEventLoop → `create_subprocess_exec` 不再 `NotImplementedError`。
+
+**结论**:原 issue 的两个 root cause(sh-shim + SelectorEventLoop)**已解决**。subprocess 机制跑通。
+
+### ⚠️ 第三障碍(新发现,openclaw 包依赖问题,非 lobsterScan 应用代码)
+
+subprocess 跑通后,openclaw.mjs 运行时崩在:
+
+```
+[openclaw] Failed to start CLI: TypeError: LRUCache is not a constructor
+    at hosted-git-info@9.0.3/lib/index.js:8  → const { LRUCache } = require('lru-cache')
+```
+
+**诊断**:
+- `hosted-git-info@9.0.3` 声明 `lru-cache ^11`(用 named export `{ LRUCache }`),其 pnpm symlink
+  **正确指向 11.3.6**。
+- 但 openclaw.mjs 运行时(node v24.14.0),`require('lru-cache')` 从 hosted-git-info 上下文
+  **实际解析到 `lru-cache@7.18.3`**(v7 是 default export `module.exports = LRUCache`,无 named
+  `LRUCache`)→ 解构得 `undefined` → not a constructor。
+- pnpm 依赖树里 `lru-cache` **7.18.3 与 11.3.6 并存**(不同包依赖不同 major);两版本消费者**互斥**
+  (v7 用 default、v11 用 named),单版本 `pnpm.overrides` 强制任一版本都会破坏另一组。
+- 根因疑为 **node v24 + pnpm hoisted node-linker** 的 module resolution 交互(node v24 很新,
+  openclaw 2026.5.5 可能针对 LTS 测试)。
+
+**候选解(属包管理/环境层,需用户决策 + 重装验证)**:
+1. **切 node LTS**(v20/22):openclaw 大概率针对 LTS 测试;当前 nvm4w 仅装 v24,需 `nvm install 20`。
+2. **`.npmrc` 设 `node-linker=isolated`** + `pnpm install`:严格 symlink 隔离,每包用自己声明的
+   lru-cache;影响整个 node_modules,需重跑 `pnpm bootstrap` 验证。
+3. **等 openclaw 包升级**修复其依赖树(hosted-git-info → lru-cache 解析)。
+
+> lobsterScan 应用代码(Fix A/B)已尽其所能;第三障碍在 openclaw npm 包 + node 版本兼容,不在
+> 应用代码修复范围内强行 patch(全树 override 有破坏其他包的实际风险)。
+
 ## 关联
 
 - P2 spec: `specs/002-worker-subscription/`(T038/T040 因本问题 deferred)
-- 已落地缓解: commit `c249064`(main.py ProactorEventLoop policy,只解 plain uvicorn 场景)
+- P3 spec: `specs/003-coordinator-transform/`(T050/T051 同此问题 deferred)
+- P4 spec: `specs/004-reviewer-dual-track/`(T044 同此问题 deferred)
+- 已落地: commit `c249064`(main.py ProactorEventLoop policy)+ Fix A/B(本分支)
 - 宪章原则 III(降级而非崩溃):注意 step 失败时**任务不应直接 failed**,当前 8/8
   全 failed 也暴露了兜底链在"全员 subprocess 不可用"极端场景下没有降级到 partial ——
   可考虑单独跟进。

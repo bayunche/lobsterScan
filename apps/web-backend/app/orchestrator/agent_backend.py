@@ -24,10 +24,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
+import sys
 import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from ..openclaw.client import TurnResult, _parse_top_object, _walk_find
@@ -164,10 +167,34 @@ class OpenClawSubprocessBackend(AgentBackend):
                  default_model: str | None = None,
                  thinking: str | None = None) -> None:
         self._bin = openclaw_bin or os.environ.get("OPENCLAW_BIN") or "openclaw"
+        # Fix A(Windows pipeline runnability):node_modules/.bin/openclaw 是 POSIX sh shim,
+        # Windows CreateProcess 不识别 shebang → [WinError 193]。改用 `node <openclaw.mjs>`。
+        self._argv_prefix = self._resolve_argv_prefix()
         # **不在 __init__ 算定 default_model**——管台改 openclaw.json 后要立刻生效,
         # 见 _resolve_default_model:每个 turn 才读。external override 保留为 explicit 字段。
         self._explicit_default_model = default_model
         self._thinking = thinking or os.environ.get("OPENCLAW_THINKING") or "low"
+
+    def _resolve_argv_prefix(self) -> list[str]:
+        """命令前缀:非 Windows = [bin];Windows = [node, openclaw.mjs](绕过 sh shim)。
+
+        从 OPENCLAW_BIN(通常 <repo>/node_modules/.bin/openclaw)推导
+        <repo>/node_modules/openclaw/openclaw.mjs(#!/usr/bin/env node 入口)。
+        找不到 mjs / 非 Windows 时原样用 self._bin。详 docs/issues/windows-real-pipeline-runnability.md。
+        """
+        if sys.platform != "win32":
+            return [self._bin]
+        try:
+            # .bin/openclaw → ../../openclaw/openclaw.mjs
+            mjs = Path(self._bin).resolve().parent.parent / "openclaw" / "openclaw.mjs"
+            if mjs.is_file():
+                node = shutil.which("node") or "node"
+                log.info("Windows: openclaw via node %s", mjs)
+                return [node, str(mjs)]
+            log.warning("openclaw.mjs not found at %s; fallback to bin %s", mjs, self._bin)
+        except Exception as e:  # noqa: BLE001
+            log.warning("resolve openclaw.mjs failed: %s; fallback to bin", e)
+        return [self._bin]
 
     def _resolve_default_model(self) -> str:
         """决定本 turn 给 openclaw 的 --model 参数。优先级:
@@ -210,7 +237,7 @@ class OpenClawSubprocessBackend(AgentBackend):
         session_id = uuid.uuid4().hex
         effective_model = model or self._resolve_default_model()
         cmd = [
-            self._bin, "--profile", profile,
+            *self._argv_prefix, "--profile", profile,
             "agent", "--agent", "main", "--local", "--json",
             "--session-id", session_id,
             "-m", message,
