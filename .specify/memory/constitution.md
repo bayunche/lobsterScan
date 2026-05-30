@@ -1,3 +1,32 @@
+<!--
+Sync Impact Report — Constitution Amendment
+============================================
+Version change: 1.0.0 → 1.1.0 (MINOR — 扩展原则 IV 的边界，新增受限 LLM 例外)
+Ratification date: 2026-05-28 (unchanged)
+Last amended: 2026-05-30
+
+Modified principles:
+- IV. Coordinator 与 Reviewer 的职责边界 — 新增「drift 判断的受限 LLM 例外」子条款：
+  放宽 docs §9.4.7 决策 1 隐含的「Coordinator 是纯规则引擎（无 LLM）」约束，
+  允许 observer 的「跑题 drift 判断」调用一次受限 LLM（minimal context / 只发声 /
+  不路由 / 不审质量 / 不改产物）。原则 IV 其余红线（不路由 next-speaker、不审内容
+  质量、不重写产物）全部保留；Coordinator 的路由/兜底/收尾 gatekeeper 仍是纯规则。
+
+Added sections: 无（在既有原则 IV 内扩展子条款）
+Removed sections: 无
+
+Templates / docs requiring updates:
+- ✅ .specify/templates/plan-template.md — Constitution Check 为通用占位，无需改
+- ✅ .specify/templates/spec-template.md — 无 mandatory section 增删，无需改
+- ✅ .specify/templates/tasks-template.md — 无 principle-driven 任务类型增删，无需改
+- ✅ docs/开发文档.md §9.4.7 决策 1 — 由本宪章在 P3 显式放宽（引用本修订）；
+     正文为设计规范，trust-the-code 原则下不强制同步改写，已在此 Report 记录差异
+- ✅ specs/003-coordinator-transform/ — plan.md / spec.md / tasks.md 已预置 Phase 0
+     宪章修订前置（drift/US4 阻塞解除即依此修订）
+
+Follow-up TODOs: 无
+-->
+
 # lobsterScan / 会汇报 Constitution
 
 > 展示名：**会汇报** · 底座：**OpenClaw 多 Agent 集群** · 面向：基层主管 / 项目小负责人
@@ -53,6 +82,25 @@ Coordinator **不做的事**（红线）：
 Reviewer **不做的事**（红线）：
 - 不直接 `@` 其他 agent（`verdict.fail` 由 Coordinator 转写）
 - 不重写产物（只给建议，重写由对应 agent 自己做）
+
+**drift 判断的受限 LLM 例外（v1.1.0 修订，自 P3 起生效）**：
+
+`docs/开发文档.md` §9.4.7 决策 1 原定「Coordinator 是**纯**规则引擎（无 LLM）」。
+自 P3（`specs/003-coordinator-transform/`）起，本宪章**放宽**该约束的唯一一处：
+observer 的**跑题 drift 判断**（原则 IV 已列为 Coordinator 合法的「流程纠偏」职责）
+允许调用**一次受限 LLM**，但 MUST 严格满足以下全部限定：
+
+- **输入受限**：仅「原始汇报目标 + 最近 K 条发言」（minimal context），**不**喂全量 transcript
+- **输出受限**：仅「是否跑题（布尔）+ 复诵原始目标的文案」，无其他指令
+- **行为受限**：仍守原则 IV 全部红线 —— **不**路由 next-speaker、**不**审内容质量
+  （Reviewer 的活）、**不**重写 / 不接管任何 agent 的产物
+- **范围受限**：仅 drift 这一项语义判断破例用 LLM；Coordinator 的**路由 / 兜底 /
+  收尾 gatekeeper / stagnation 检测**逻辑仍是**纯规则**（无 LLM）
+- **降级**：drift LLM 调用失败 / 超时 MUST 跳过本次判断（仅 log），不得让任务 `failed`（原则 III）
+
+Coordinator 的「主体规则引擎」定位不变；本例外不构成「Coordinator 全面 LLM 化」，
+不得据此引申到路由 / 收尾 / 兜底等其他职责。真 LLM 实现受运行环境约束
+（见 `docs/issues/windows-real-pipeline-runnability.md`），可先以可注入 mock 形态落地接口。
 
 ### V. Agent 自治与隔离
 
@@ -119,6 +167,6 @@ Reviewer **不做的事**（红线）：
 
 ---
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-28 | **Last Amended**: 2026-05-28
+**Version**: 1.1.0 | **Ratified**: 2026-05-28 | **Last Amended**: 2026-05-30
 
 <!-- 本宪章自 docs/开发文档.md v1.1 §9.4 与 CLAUDE.md 的约定整理而来。 -->
