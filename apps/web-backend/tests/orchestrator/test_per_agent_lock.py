@@ -133,18 +133,20 @@ async def test_handle_v2_event_lock_wait_timeout_emits_silent(tmp_outputs_dir, m
 
     async def _noop(*a, **kw):  # type: ignore[no-untyped-def]
         return None
+    # P4:用 material(非 reviewer)—— reviewer 在 v2 被特化分支拦截(不走锁逻辑);
+    # 锁超时降级 silent 适用普通 work-driver agent。
     w = AgentWorker(
-        agent_id="reviewer", step_key="reviewer", state=state,
+        agent_id="material", step_key="material_parsing", state=state,
         run_step_fn=_noop, gate_review_fn=None,
     )
-    state.subscriptions.register("reviewer", w, WORKER_PROFILE["reviewer"])
+    state.subscriptions.register("material", w, WORKER_PROFILE["material"])
 
     # 故意把超时阈值缩到 0.05s
     import app.orchestrator.subscription as sub_mod
     monkeypatch.setattr(sub_mod, "V2_LOCK_WAIT_SEC", 0.05)
 
     # holder 先抢锁,持 0.5s
-    lock = state.get_agent_lock("reviewer")
+    lock = state.get_agent_lock("material")
     holder_acquired = asyncio.Event()
 
     async def holder():
@@ -155,11 +157,11 @@ async def test_handle_v2_event_lock_wait_timeout_emits_silent(tmp_outputs_dir, m
     holder_task = asyncio.create_task(holder())
     await holder_acquired.wait()
 
-    # 触发一条 mentions=["reviewer"] 的 speak → 走 handle_v2_event 拿锁失败 → silent
+    # 触发一条 mentions=["material"] 的 speak → 走 handle_v2_event 拿锁失败 → silent
     trigger = AgentSpeak(
         task_id=task_id, **{"from": "x"},
-        text="@reviewer", intent="ask",
-        mentions=["reviewer"],
+        text="@material", intent="ask",
+        mentions=["material"],
     )
     await w.handle_v2_event(trigger)
 
@@ -172,7 +174,7 @@ async def test_handle_v2_event_lock_wait_timeout_emits_silent(tmp_outputs_dir, m
     ]
     silents = [
         r for r in rows
-        if r.get("msg_type") == "agent.silent" and r.get("from") == "reviewer"
+        if r.get("msg_type") == "agent.silent" and r.get("from") == "material"
     ]
     assert len(silents) >= 1, f"超时应 emit AgentSilent;实际 rows={rows}"
     assert any("超时" in s.get("reason", "") for s in silents), (

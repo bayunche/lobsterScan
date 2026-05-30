@@ -248,6 +248,8 @@ class AgentWorker:
         # v1 路径下永远保持 None,零开销(FR-003)。
         self.inbox: asyncio.Queue["V2EventBase"] | None = None
         self._consume_task: asyncio.Task | None = None
+        # P4 字段(spec 004-reviewer-dual-track, T006):质量轨版本去重(仅 reviewer 用)。
+        self._reviewed: set[tuple[str, int]] = set()
 
     # ── P2 v2 订阅消费(T025, spec 002-worker-subscription) ──
     # 三件套:start_v2_consumer / enqueue_v2 / _consume_loop
@@ -316,6 +318,12 @@ class AgentWorker:
         **不调 _run_step**(red line: Coordinator 路径仍是 LLM 工作唯一驱动)。
         per-agent lock 包裹由 T034(Phase 5 US3)落地。
         """
+        # P4 (T007/T019, spec 004):reviewer 特化早期分支 —— 全程订阅审校者,
+        # 不走 P3 work-driver。ArtifactUpdate → 质量轨即时审;被 mention → silent。
+        if self.agent_id == "reviewer" and self.state.is_v2:
+            await self._reviewer_handle(event)
+            return
+
         from .artifacts_v2 import next_version
         from .events_v2 import CORE_ARTIFACTS, AgentSilent, AgentSpeak
         from .subscription import DecisionResult, decide_to_speak
@@ -412,6 +420,43 @@ class AgentWorker:
                 ))
         finally:
             lock.release()
+
+    async def _reviewer_handle(self, event: "V2EventBase") -> None:
+        """P4 (T019) reviewer 特化:ArtifactUpdate → 质量审;否则 silent(不跑链式 step)。"""
+        from .events_v2 import AgentSilent, ArtifactUpdate
+        st = self.state
+        if st.run is None:
+            return
+        task_id = getattr(st.run, "task_id", "") or ""
+        try:
+            if isinstance(event, ArtifactUpdate):
+                await self._reviewer_quality_review(event)
+            else:
+                await st.emit_v2(AgentSilent(
+                    task_id=task_id, **{"from": "reviewer"},
+                    reply_to=getattr(event, "message_id", None),
+                    reason="持续审校中,收尾给结论",
+                ))
+        except Exception as e:  # noqa: BLE001 — FR-019 降级
+            log.warning("reviewer handle crashed: %s", e)
+
+    async def _reviewer_quality_review(self, event: "V2EventBase") -> None:
+        """P4 (T018) 质量轨:artifact 即时审 → emit ReviewerVerdict(quality)。版本去重(FR-004)。"""
+        st = self.state
+        key = (getattr(event, "id", ""), getattr(event, "version", 0))
+        if key in self._reviewed:
+            return
+        self._reviewed.add(key)
+        from .pipeline import AGENT_TO_STEP, _quick_review
+        step = st.by_key.get(AGENT_TO_STEP.get(getattr(event, "producer", ""), ""))
+        if step is None or getattr(step, "output_json", None) is None:
+            return
+        qr = await _quick_review(step, st.run)
+        verdict = _to_reviewer_verdict(
+            qr, dimension="quality", fix_agent=getattr(event, "producer", ""),
+            task_id=getattr(st.run, "task_id", "") or "",
+        )
+        await st.emit_v2(verdict)
 
     async def force_run_v2(self) -> None:
         """observer stagnation 激活专用入口(P3, T031):绕过 decide_to_speak 直接跑 step。
@@ -765,6 +810,36 @@ class Coordinator:
 
 
 # ───────────────────────────── 顶层 run ─────────────────────────────
+
+def _pad_suggestions(seed: list[str]) -> list[str]:
+    """凑 ≥3 条建议(满足 P1 ReviewerVerdict.suggestions min_length=3)。P4, T005。"""
+    out = [s for s in seed if s][:3]
+    fillers = ["保持术语与数据口径一致", "核对与原始材料的对应关系", "收尾前再整体校一遍"]
+    i = 0
+    while len(out) < 3:
+        out.append(fillers[i % len(fillers)])
+        i += 1
+    return out
+
+
+def _to_reviewer_verdict(qr: dict, *, dimension: str, fix_agent: str, task_id: str):
+    """_quick_review dict → ReviewerVerdict 适配(P4, T005)。accept→verdict;凑 ≥3 suggestions。"""
+    from .events_v2 import Finding, ReviewerVerdict
+    accept = bool(qr.get("accept", True))
+    reason = (qr.get("reason") or "").strip()
+    comment = (qr.get("comment") or "").strip()
+    findings = [] if accept else [
+        Finding(severity="med", what=(reason or comment or "需改进")[:200]),
+    ]
+    return ReviewerVerdict(
+        task_id=task_id,
+        verdict="pass" if accept else "fail",
+        dimension=dimension,
+        findings=findings,
+        suggested_fix_agent=None if accept else fix_agent,
+        suggestions=_pad_suggestions([reason or comment]),
+    )
+
 
 def _derive_goal(run: Any) -> str:
     """从 TaskRun 派生原始汇报目标(P3, T009)。drift 判断 + gate_reject 文案用。"""

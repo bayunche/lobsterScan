@@ -71,6 +71,7 @@ async def test_is_quiescent_truth_table(tmp_outputs_dir):
     events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_o" / "events.jsonl"
     state = _hstate(events_path)
     obs = CoordinatorObserver(state=state, workers={}, goal="g")
+    obs._process_reviewed = True  # P4:跳过流程逻辑审,直接测 gatekeeper 决策
 
     assert obs._is_quiescent() is True  # bootstrapped + inflight0 + 未完成 + 无 worker
 
@@ -116,6 +117,7 @@ async def test_quiescence_gate_pass_done(tmp_outputs_dir, stub_state):
     await _write_all_artifacts(stub_state("tsk_o", events_path))
 
     obs = CoordinatorObserver(state=state, workers={}, goal="g")
+    obs._process_reviewed = True  # P4:跳过流程逻辑审,直接测 gatekeeper 决策
     await obs._on_quiescence()
 
     assert state.done.done() and state.done.result() == "done"
@@ -144,6 +146,7 @@ async def test_stagnation_activates_ready_silent_worker(tmp_outputs_dir):
     w = AgentWorker(agent_id="material", step_key="material_parsing", state=state,
                     run_step_fn=_run_step, gate_review_fn=None)
     obs = CoordinatorObserver(state=state, workers={"material": w}, goal="g")
+    obs._process_reviewed = True  # P4:跳过流程逻辑审,直接测 stagnation 激活
 
     # gate 不齐(无任何 artifact)→ 激活 material（requires=() 满足,MaterialPool 未产）
     await obs._on_quiescence()
@@ -205,6 +208,7 @@ async def test_stagnation_unresolvable_to_partial(tmp_outputs_dir, monkeypatch):
 
     # 无任何 artifact + 无 worker 注册 → _ready_silent_workers 为空(无可激活)
     obs = CoordinatorObserver(state=state, workers={}, goal="周报主题")
+    obs._process_reviewed = True  # P4:跳过流程逻辑审,直接测无解→partial
 
     await obs._on_quiescence()  # retry 1
     assert not state.done.done()
@@ -225,6 +229,7 @@ async def test_gatekeeper_always_terminates(tmp_outputs_dir, monkeypatch):
     state = _hstate(events_path)
     state.subscriptions = SubscriptionRegistry()
     obs = CoordinatorObserver(state=state, workers={}, goal="g")
+    obs._process_reviewed = True  # P4:跳过流程逻辑审,直接测 gatekeeper 决策
 
     await obs._on_quiescence()  # 无 artifact 无 worker → 立即达 MAX(1) → partial
     assert state.done.done(), "gatekeeper 必须给确定终止状态(done 被 set)"

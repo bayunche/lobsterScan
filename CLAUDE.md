@@ -175,21 +175,27 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** (planning)
+Active spec-driven feature: **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** ✅ Implemented
 - Plan:       `specs/004-reviewer-dual-track/plan.md`
 - Spec:       `specs/004-reviewer-dual-track/spec.md`
 - Research:   `specs/004-reviewer-dual-track/research.md` (9 decisions + 4 派生发现)
 - Data model: `specs/004-reviewer-dual-track/data-model.md`
 - Quickstart: `specs/004-reviewer-dual-track/quickstart.md`
-- (contracts/ skipped — 内部架构,复用 P1 ReviewerVerdict schema)
+- Tasks:      `specs/004-reviewer-dual-track/tasks.md` (44/45;US1-US5 + 实现 + 测试全绿;T044 v1 baseline + v2 真 LLM 质量审挂 Windows issue 后人工)
+- (contracts/ skipped — 复用 P1 ReviewerVerdict schema)
 - Constitution: `.specify/memory/constitution.md` (v1.1.0;P4 **无需新宪章修订** — Reviewer 用 LLM 做质量验证是原则 IV 本职)
-设计要点:Reviewer 从"v1 即时质量门 + P3 链式终点 work-driver"重构为全程订阅双轨审校者 ——
-      **质量轨**(reviewer 订阅 artifact.update → handle_v2_event 特化 → 复用 `_quick_review` →
-      emit ReviewerVerdict(quality);版本去重)+ **流程逻辑轨**(observer quiescence → 新模块
-      `process_review.py` 3 纯规则:版本一致/依赖图/参与度 → ReviewerVerdict(process_logic))。
-      verdict.fail → observer bus.on 监听 → 转写 intervene 点名 + 重置 step `needs_fix`(解除 P3
-      去重)+ force_run_v2 修复(REVIEW_FIX_MAX_RETRY 上限);gatekeeper `_on_quiescence` 双因子
-      (完整性 + verdict)决策。验收基线=ScriptedBackend 测试级。
+Code: `apps/web-backend/app/orchestrator/process_review.py` (新模块 ~130 行;`ProcessReviewer` 3 纯规则
+      版本一致/依赖图/参与度 + `_process_verdict`)
+      + `harness.py` 扩(`AgentWorker._reviewed` 版本去重 + `handle_v2_event` reviewer 特化早期分支 +
+      `_reviewer_handle`/`_reviewer_quality_review`(ArtifactUpdate→质量审/否则 silent)+
+      `_to_reviewer_verdict`/`_pad_suggestions` 适配)
+      + `coordinator_observer.py` 扩(`REVIEW_FIX_MAX_RETRY` + `_fix_retries`/`_process_reviewed`/
+      `_artifact_log` + `bus.on(reviewer.verdict)→_on_verdict` 修复闭环 + `_on_quiescence` 双因子改造)
+Tests: `apps/web-backend/tests/orchestrator/*` (98 passed;P1 32 + P2 29 + P3 20 + P4 17:US1 2 +
+      US2 4 + US3 4 + US4 4 + US5 3)。v1 字段级零回归。
+关键转变:Reviewer 不再是链式 work-driver 一环(P3 中跑 review step;P4 改为全程订阅审校者,被
+      mention→silent);ReviewerVerdict 从 P3 `_emit_v2_finalization` 示例变为真实双轨 emit。
+      质量轨 LLM(report-reviewer)真任务挂 Windows issue,ScriptedBackend/monkeypatch _quick_review 测试级覆盖。
 
 Previously shipped (still authoritative for code):
 - **P3 Coordinator 转型 + subscription work-driver** ✅ Implemented — `specs/003-coordinator-transform/`

@@ -174,7 +174,8 @@ async def test_v2_subscription_drives_8step_closed_loop(tmp_outputs_dir, monkeyp
             s.output_json = {"_fake": "data"}
 
     run = type("R", (), {"task_id": "tsk_loop", "title": "周报", "report_type": "project_progress",
-                         "audience": "直属领导", "raw_text": "本周完成 A/B/C"})()
+                         "audience": "直属领导", "raw_text": "本周完成 A/B/C",
+                         "duration": "3分钟"})()
     by_key = {k: StepState(step=k, label=l, agent=a) for k, a, l, _ in STEPS}
 
     result = await run_harness(
@@ -186,6 +187,8 @@ async def test_v2_subscription_drives_8step_closed_loop(tmp_outputs_dir, monkeyp
     )
 
     assert result["reason"] == "done", f"observer 应收尾 done;实际 {result['reason']}"
-    # 8 step 全部由 subscription 链式驱动跑过
-    assert len(ran) == len(STEPS), f"应跑 {len(STEPS)} step;实际 {len(ran)}: {ran}"
-    assert set(ran) == {k for k, *_ in STEPS}, f"8 step 应全跑;实际 {ran}"
+    # P4:reviewer 不再跑链式 step(全程订阅审校者)→ 7 step(material..video_production)。
+    expected = [k for k, *_ in STEPS if k != "review"]
+    assert "review" not in ran, "P4 reviewer 不跑链式 step"
+    assert len(ran) == len(expected), f"应跑 {len(expected)} step(非 review);实际 {len(ran)}: {ran}"
+    assert set(ran) == set(expected)

@@ -347,3 +347,30 @@ async def test_v1_no_p3_events_in_log(tmp_outputs_dir):
     raw = events_path.read_text(encoding="utf-8")
     for forbidden in ("stagnation", "drift", "gate_pass", "gate_reject", "quiescence"):
         assert forbidden not in raw, f"v1 events.jsonl 不应含 P3 词 {forbidden!r}"
+
+
+# ────────────────────────────── P4 v1 零回归 ──────────────────────────────
+# T009-T010 · spec 004-reviewer-dual-track · US1 P1 红线
+
+
+def test_v1_reviewer_worker_reviewed_empty():
+    """T009 [US1] · v1 路径 reviewer worker `_reviewed` 为空(质量轨版本去重未启用)。"""
+    state = _make_state(is_v2=False)
+    w = _make_worker(state, "reviewer")
+    assert w._reviewed == set(), "v1 路径 reviewer 不做质量轨,_reviewed 应为空"
+
+
+async def test_v1_no_reviewer_verdict_events(tmp_outputs_dir):
+    """T010 [US1] · v1 emit 的 events.jsonl 无 P4 词(reviewer.verdict/needs_fix/process_logic)。"""
+    events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_v1_p4" / "events.jsonl"
+    state = HarnessState(
+        run=type("R", (), {"task_id": "tsk_v1_p4"})(),
+        prev={}, by_key={}, bus=EventBus(),
+        is_v2=False, events_jsonl_path=events_path,
+    )
+    await state.emit("task.start", "coordinator", None, {"steps": ["a"]})
+    await state.emit("agent.done", "reviewer", "review", {"tokens": 0})
+
+    raw = events_path.read_text(encoding="utf-8")
+    for forbidden in ("reviewer.verdict", "needs_fix", "process_logic", "suggested_fix_agent"):
+        assert forbidden not in raw, f"v1 events.jsonl 不应含 P4 词 {forbidden!r}"

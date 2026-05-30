@@ -60,6 +60,8 @@ OBSERVER_TICK_SEC: float = float(os.environ.get("OBSERVER_TICK_SEC", "0.5"))
 DRIFT_EVERY_N_TICK: int = int(os.environ.get("DRIFT_EVERY_N_TICK", "10"))
 DRIFT_RECENT_K: int = int(os.environ.get("DRIFT_RECENT_K", "5"))
 STAGNATION_MAX_RETRY: int = int(os.environ.get("STAGNATION_MAX_RETRY", "3"))
+# P4(spec 004-reviewer-dual-track):同一 fix_agent 的 verdict.fail 修复次数上限。
+REVIEW_FIX_MAX_RETRY: int = int(os.environ.get("REVIEW_FIX_MAX_RETRY", "2"))
 
 
 # 各 agent 产出的核心 artifact（agent_id → artifact_id）。
@@ -170,6 +172,10 @@ class CoordinatorObserver:
     _tick: int = 0
     _stagnation_retries: int = 0
     _recent: list[str] = field(default_factory=list)  # 最近 agent.speak.text（drift 用）
+    # P4 字段(spec 004-reviewer-dual-track)
+    _fix_retries: dict[str, int] = field(default_factory=dict)   # 按 fix_agent 修复计数
+    _process_reviewed: bool = False                               # 流程逻辑审收尾去重
+    _artifact_log: list[dict] = field(default_factory=list)       # artifact.update 时序(流程逻辑轨用)
 
     # ── 生命周期 ──
 
@@ -177,6 +183,9 @@ class CoordinatorObserver:
         if self._task is None:
             # 订阅 agent.speak 收集 recent speaks（emit_v2 不进 events_log,故走 bus）
             self.state.bus.on("agent.speak", self._collect_speak)
+            # P4:订阅 reviewer.verdict(fail 修复闭环)+ artifact.update(流程逻辑轨时序)
+            self.state.bus.on("reviewer.verdict", self._on_verdict)
+            self.state.bus.on("artifact.update", self._collect_artifact)
             self._task = asyncio.create_task(self._loop())
 
     async def _collect_speak(self, event) -> None:
@@ -189,6 +198,39 @@ class CoordinatorObserver:
                     self._recent = self._recent[-cap:]
         except Exception:  # noqa: BLE001 — FR-024
             pass
+
+    async def _collect_artifact(self, event) -> None:
+        """P4:收集 artifact.update 时序(emit_v2 不进 events_log,故走 bus)。"""
+        try:
+            p = getattr(event, "payload", None) or {}
+            if p.get("id"):
+                self._artifact_log.append(
+                    {"id": p.get("id"), "version": p.get("version"), "producer": p.get("producer")}
+                )
+        except Exception:  # noqa: BLE001 — FR-019
+            pass
+
+    async def _on_verdict(self, event) -> None:
+        """P4 (T032):监听 reviewer.verdict(fail)→ 转写 intervene + 重置 step + force_run_v2 修复。"""
+        try:
+            p = getattr(event, "payload", None) or {}
+            if p.get("verdict") != "fail":
+                return
+            fix_agent = p.get("suggested_fix_agent")
+            if not fix_agent or fix_agent not in self.workers:    # FR-013 缺失/无效不修
+                return
+            if self._fix_retries.get(fix_agent, 0) >= REVIEW_FIX_MAX_RETRY:  # FR-011 上限
+                return
+            self._fix_retries[fix_agent] = self._fix_retries.get(fix_agent, 0) + 1
+            await self._emit_intervene("gate_reject", f"{self._display(fix_agent)} 那块再打磨一下。")
+            from .pipeline import AGENT_TO_STEP
+            step = self.state.by_key.get(AGENT_TO_STEP.get(fix_agent, ""))
+            if step is not None:
+                step.status = "needs_fix"     # 解除 P3 work-driver "success 跳过" 去重
+            self.state.inflight_steps += 1
+            asyncio.create_task(self.workers[fix_agent].force_run_v2())
+        except Exception as e:  # noqa: BLE001 — FR-019
+            log.warning("verdict fix dispatch crashed: %s", e)
 
     async def stop(self) -> None:
         if self._task is not None and not self._task.done():
@@ -233,13 +275,32 @@ class CoordinatorObserver:
     # ── quiescence 处理:gatekeeper + stagnation（T031 + T038） ──
 
     async def _on_quiescence(self) -> None:
+        # P4 ①:流程逻辑审(收尾一次)→ emit ReviewerVerdict(process_logic);
+        # fail 经 bus → _on_verdict 自动触发修复(若可定位 fix_agent)→ 非 quiescent,下一拍再综合。
+        if not self._process_reviewed:
+            self._process_reviewed = True
+            try:
+                from .process_review import ProcessReviewer, _process_verdict
+                pr = ProcessReviewer().check(self._task_id(), self._artifact_log)
+                await self.state.emit_v2(_process_verdict(pr, self._task_id()))
+            except Exception as e:  # noqa: BLE001 — FR-019
+                log.warning("process review crashed: %s", e)
+            return   # 本拍先出 verdict;让修复有机会触发,下一拍再综合决策
+
+        # P4 ②:gatekeeper 双因子综合决策(artifact 完整性 + 未解决 verdict.fail)
         result = self.gate.check(self._task_id())
-        if result.passed:
-            await self._emit_intervene("gate_pass", "全部产物都齐了,我来收尾。")
+        unresolved = any(v >= REVIEW_FIX_MAX_RETRY for v in self._fix_retries.values())
+        if result.passed and not unresolved:
+            await self._emit_intervene("gate_pass", "产物齐了、审校也过了,我来收尾。")
             self._set_done("done")
             return
+        if result.passed and unresolved:
+            # 产物齐但有审校项修不好(达修复上限)→ partial(FR-015),不走 stagnation
+            await self._emit_intervene("gate_reject", "有审校项没完全通过,先按现有内容交付。")
+            self._set_done("partial")
+            return
 
-        # 不齐:先 stagnation 激活"依赖就绪却静默"的 worker
+        # 产物不齐:先 stagnation 激活"依赖就绪却静默"的 worker
         activated = await self._activate_ready_silent_workers()
         if activated:
             self._stagnation_retries = 0
@@ -249,12 +310,12 @@ class CoordinatorObserver:
         # 无可激活 → 累计无解,达上限转 partial 收尾
         self._stagnation_retries += 1
         if self._stagnation_retries >= STAGNATION_MAX_RETRY:
-            miss = "、".join(
-                self._display(ARTIFACT_PRODUCER.get(m, m)) for m in result.missing
-            )
-            await self._emit_intervene(
-                "gate_reject", f"还差 {miss} 的部分,先按现有内容交付。"
-            )
+            if result.missing:
+                miss = "、".join(self._display(ARTIFACT_PRODUCER.get(m, m)) for m in result.missing)
+                reason = f"还差 {miss} 的部分,先按现有内容交付。"
+            else:
+                reason = "有审校项没完全通过,先按现有内容交付。"
+            await self._emit_intervene("gate_reject", reason)
             self._set_done("partial")
 
     def _available_artifacts(self) -> set[str]:
