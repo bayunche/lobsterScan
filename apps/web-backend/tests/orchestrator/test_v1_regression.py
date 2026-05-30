@@ -267,3 +267,83 @@ async def test_v1_emit_v2_does_not_dispatch_to_subscriptions(tmp_outputs_dir):
         "FR-003 + emit_v2 第一行 if not self.is_v2: return)"
     )
     assert bus_calls == [], "v1 路径 emit_v2 不应触达 bus.emit"
+
+
+# ────────────────────────────── P3 v1 零回归 ──────────────────────────────
+# T011-T013 · spec 003-coordinator-transform · US1 P1 红线护栏
+#
+# 锁住 P3 新字段/行为在 v1 路径完全短路:observer 不构造、inflight 不动、
+# Coordinator 仍 chain 路由、events.jsonl 无 P3 新事件。
+
+from app.orchestrator.harness import AgentEvent, Coordinator
+
+
+def test_v1_observer_and_inflight_default():
+    """T011 [US1] · v1 路径 observer is None / inflight_steps==0 / bootstrapped False。"""
+    state = _make_state(is_v2=False)
+    assert state.observer is None, "v1 路径 observer 必须为 None(零开销红线)"
+    assert state.inflight_steps == 0, "v1 路径 inflight_steps 必须为 0"
+    assert state.bootstrapped is False, "v1 路径 bootstrapped 必须为 False"
+
+
+def _make_coordinator(state, spy_workers):
+    """构造一个最小 Coordinator(material → material_parsing 单步链)。"""
+    return Coordinator(
+        state=state, workers=spy_workers,
+        agent_to_step={"material": "material_parsing"},
+        step_to_agent={"material_parsing": "material"},
+        default_next_step={"material_parsing": "DONE"},
+        agent_display={"material": "资料员"},
+    )
+
+
+class _SpyWorker:
+    def __init__(self) -> None:
+        self.ran = 0
+
+    async def run(self) -> None:
+        self.ran += 1
+
+
+async def test_v1_coordinator_still_chain_routes():
+    """T012 [US1] · v1 路径 Coordinator.on_handoff 不 short-circuit(仍 chain 派单)。"""
+    state = _make_state(is_v2=False)
+    spy = _SpyWorker()
+    coord = _make_coordinator(state, {"material": spy})
+
+    ev = AgentEvent(kind="agent.handoff", agent_id="coordinator", step_key=None,
+                    payload={"to": "material"})
+    await coord.on_handoff(ev)
+    await asyncio.sleep(0.01)  # 让 create_task(spy.run()) 跑起来
+
+    assert spy.ran == 1, "v1 路径 Coordinator 应 chain 派单(on_handoff 不 short-circuit)"
+
+
+async def test_v2_coordinator_short_circuits_chain():
+    """T019 对照 [US2] · v2 路径 Coordinator.on_handoff short-circuit(不 chain 派单)。"""
+    state = _make_state(is_v2=True)
+    spy = _SpyWorker()
+    coord = _make_coordinator(state, {"material": spy})
+
+    ev = AgentEvent(kind="agent.handoff", agent_id="coordinator", step_key=None,
+                    payload={"to": "material"})
+    await coord.on_handoff(ev)
+    await asyncio.sleep(0.01)
+
+    assert spy.ran == 0, "v2 路径 Coordinator 必须 short-circuit(驱动交给 subscription)"
+
+
+async def test_v1_no_p3_events_in_log(tmp_outputs_dir):
+    """T013 [US1] · v1 emit 的 events.jsonl 无 P3 新事件(stagnation/drift/gate)。"""
+    events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_v1_p3" / "events.jsonl"
+    state = HarnessState(
+        run=type("R", (), {"task_id": "tsk_v1_p3"})(),
+        prev={}, by_key={}, bus=EventBus(),
+        is_v2=False, events_jsonl_path=events_path,
+    )
+    await state.emit("task.start", "coordinator", None, {"steps": ["a"]})
+    await state.emit("agent.handoff", "coordinator", None, {"to": "material"})
+
+    raw = events_path.read_text(encoding="utf-8")
+    for forbidden in ("stagnation", "drift", "gate_pass", "gate_reject", "quiescence"):
+        assert forbidden not in raw, f"v1 events.jsonl 不应含 P3 词 {forbidden!r}"

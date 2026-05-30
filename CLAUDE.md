@@ -175,19 +175,29 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P3 — Coordinator 转型(observer + gatekeeper)+ subscription work-driver** (planning)
+Active spec-driven feature: **P3 — Coordinator 转型(observer + gatekeeper)+ subscription work-driver** ✅ Implemented
 - Plan:       `specs/003-coordinator-transform/plan.md`
 - Spec:       `specs/003-coordinator-transform/spec.md`
-- Research:   `specs/003-coordinator-transform/research.md` (9 decisions + 4 派生发现;v2 断 chain 驱动 → subscription work-driver)
+- Research:   `specs/003-coordinator-transform/research.md` (9 decisions + 4 派生发现)
 - Data model: `specs/003-coordinator-transform/data-model.md`
 - Quickstart: `specs/003-coordinator-transform/quickstart.md`
-- (contracts/ skipped — P3 is internal architecture, no new external APIs;复用 P1 InterveneKind)
-- Constitution: `.specify/memory/constitution.md`
-- **⚠️ Phase 0 前置**:drift(US4)需先走 `/speckit-constitution` 放宽"Coordinator 纯规则引擎"(1.0.0→1.1.0);US1/US2/US3/US5 不阻塞
-设计要点:v2 路径把驱动真实 step 从 Coordinator chain 转移到 subscription —— `handle_v2_event` SPEAK
-      从 emit 气泡升级为真跑 `_run_unlocked`;起点 bootstrap 触发 material;Coordinator 4 个 handler
-      `is_v2` short-circuit,退为 `coordinator_observer.py` 的 watchdog(stagnation 规则 + drift 可注入
-      LLM + 收尾 gatekeeper)。验收基线=ScriptedBackend 测试级闭环。
+- Tasks:      `specs/003-coordinator-transform/tasks.md` (T040 宪章修订 ✅ 1.1.0;US1-US5 + 实现 + 测试全绿;T050 v1 baseline diff + T051 v2 真 LLM 闭环挂 Windows issue 后人工)
+- (contracts/ skipped — 内部架构,复用 P1 InterveneKind)
+- Constitution: `.specify/memory/constitution.md` (v1.1.0 — 原则 IV 新增 drift 受限 LLM 例外)
+Code: `apps/web-backend/app/orchestrator/coordinator_observer.py` (新模块 ~310 行;`DriftJudge`/
+      `NoDriftJudge`/注入点 + `ArtifactGate` + `CoordinatorObserver` watchdog:quiescence 检测 +
+      stagnation 激活就绪静默 worker + 收尾 gatekeeper gate_pass→done/gate_reject→partial + drift)
+      + `harness.py` 扩(`HarnessState.{inflight_steps,bootstrapped,observer,start/stop_observer}` +
+      `AgentWorker.{handle_v2_event SPEAK→真跑 _run_unlocked + step-success 去重, force_run_v2}` +
+      Coordinator 4 handler `is_v2` short-circuit + `_derive_goal` + `_bootstrap_first_step` +
+      run_harness v2 bootstrap/observer 启停)
+      + `pipeline.py` execute v2 收尾改 observer 接管(不调 `_emit_v2_finalization`,避免双 gate)
+Tests: `apps/web-backend/tests/orchestrator/*` (81 passed in 1.72s;P1 32 + P2 29 + US1 4 + US2 4 +
+       US3/US5 7 + US4 5)。v1 路径**字段级零回归**(US1 守护:observer=None/inflight=0/Coordinator 仍 chain)。
+关键转变:P2 的 v2 任务是"Coordinator chain 驱动真实 step + subscription chat overlay 并存";
+      P3 断开 v2 chain 驱动,改 subscription 链式驱动 `_run_step`(被点名+依赖就绪→真跑),
+      Coordinator 退为 observer watchdog。注意 work-driver 下 `_emit_v2_step_overlay` 的
+      artifact.update + agent.speak(mention) 会双路径触发下游,靠 step-success 去重保证只跑一次。
 
 Previously shipped (still authoritative for code):
 - **P2 worker 订阅化 + decide-to-speak 闸门** ✅ Implemented — `specs/002-worker-subscription/`

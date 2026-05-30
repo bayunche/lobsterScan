@@ -36,6 +36,7 @@ from .ids import MessageIdRegistry
 if TYPE_CHECKING:
     from .events_v2 import V2EventBase
     from .subscription import SubscriptionRegistry
+    from .coordinator_observer import CoordinatorObserver
 
 log = logging.getLogger("orchestrator.harness")
 
@@ -112,6 +113,12 @@ class HarnessState:
     # is_v2=True 时由 run_harness 构造 SubscriptionRegistry 并注册 worker(Phase 4 T028)。
     subscriptions: "SubscriptionRegistry | None" = None
     agent_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # P3 字段(spec 003-coordinator-transform, T008)。
+    # 仅 is_v2 路径使用;v1 路径全部默认值(inflight_steps=0 / bootstrapped=False /
+    # observer=None),零开销 + 零回归(FR-021/022)。
+    inflight_steps: int = 0          # 正在跑的 v2 step 数(quiescence 检测用)
+    bootstrapped: bool = False       # v2 起点是否已 bootstrap(去重 + quiescence 启动态)
+    observer: "CoordinatorObserver | None" = None  # v2 observer watchdog
 
     def get_agent_lock(self, agent_id: str) -> asyncio.Lock:
         """lazy-init per-agent Lock(spec FR-008;详 research.md §3)。
@@ -123,6 +130,20 @@ class HarnessState:
         if agent_id not in self.agent_locks:
             self.agent_locks[agent_id] = asyncio.Lock()
         return self.agent_locks[agent_id]
+
+    async def start_observer(self, workers: dict, goal: str) -> None:
+        """启动 v2 observer watchdog(P3, T008)。仅 is_v2 路径调用。"""
+        if not self.is_v2:
+            return
+        from .coordinator_observer import CoordinatorObserver
+        self.observer = CoordinatorObserver(state=self, workers=workers, goal=goal)
+        await self.observer.start()
+
+    async def stop_observer(self) -> None:
+        """停止 v2 observer watchdog(P3, T008)。任务结束时调用,清理 task。"""
+        if self.observer is not None:
+            await self.observer.stop()
+            self.observer = None
 
     async def emit(self, kind: str, agent_id: str,
                    step_key: str | None = None,
@@ -365,14 +386,25 @@ class AgentWorker:
             st.subscriptions.reply_to_registry.mark(self.agent_id, msg_id)
 
             if decision == DecisionResult.SPEAK:
-                await st.emit_v2(AgentSpeak(
-                    task_id=task_id, **{"from": self.agent_id},
-                    text=f"收到 — {reason}"[:4000],
-                    reply_to=msg_id,
-                    intent="confirm",
-                    mentions=[], cc=[], artifact_updates=[],
-                ))
-            else:  # SILENT
+                # P3 (T021, spec 003):work-driver —— 被点名且依赖就绪 → **真跑 step**
+                # (lock 已在上方持有,_run_unlocked 是无锁主体)。跑完末尾的
+                # _emit_v2_step_overlay 会 emit AgentSpeak(mentions=[下一棒]) 驱动下游
+                # 订阅唤醒,链式推进(research §2/§3)。inflight 计数供 observer quiescence 检测。
+                #
+                # 去重:_emit_v2_step_overlay 对每个 step 既 emit artifact.update 又 emit
+                # agent.speak(mention),下游会被两条路径各触发一次。lock 串行 + 本处
+                # "step 已 success 则跳过"保证同一 step 在任务内只真跑一次。
+                s = st.by_key.get(self.step_key)
+                if s is not None and getattr(s, "status", None) == "success":
+                    log.debug("worker %s · step %s 已 success,跳过重复触发",
+                              self.agent_id, self.step_key)
+                else:
+                    st.inflight_steps += 1
+                    try:
+                        await self._run_unlocked()
+                    finally:
+                        st.inflight_steps -= 1
+            else:  # SILENT —— P2 行为不变
                 await st.emit_v2(AgentSilent(
                     task_id=task_id, **{"from": self.agent_id},
                     reply_to=msg_id,
@@ -380,6 +412,31 @@ class AgentWorker:
                 ))
         finally:
             lock.release()
+
+    async def force_run_v2(self) -> None:
+        """observer stagnation 激活专用入口(P3, T031):绕过 decide_to_speak 直接跑 step。
+
+        observer 已确认本 worker 依赖就绪 + 同步 `inflight_steps += 1`;本方法 finally
+        统一 -1(无论是否拿到锁)。拿不到锁 = 它正在跑,无需重复激活(FR-011)。
+        """
+        st = self.state
+        lock = st.get_agent_lock(self.agent_id)
+        acquired = False
+        try:
+            from . import subscription as _sub
+            wait_sec = getattr(_sub, "V2_LOCK_WAIT_SEC", 60)
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=wait_sec)
+                acquired = True
+            except asyncio.TimeoutError:
+                return  # 正在跑,无需激活
+            await self._run_unlocked()
+        except Exception as e:  # noqa: BLE001 — FR-024 降级
+            log.warning("worker %s force_run_v2 crashed: %s", self.agent_id, e)
+        finally:
+            if acquired:
+                lock.release()
+            st.inflight_steps -= 1
 
     async def run(self) -> None:
         """被 Coordinator dispatch — 跑一次 step。"""
@@ -553,6 +610,10 @@ class Coordinator:
                 pass
 
     async def on_handoff(self, event: AgentEvent) -> None:
+        # P3 (T014, spec 003):v2 路径不 chain 路由 —— 驱动真实 step 的职责已转移到
+        # subscription(handle_v2_event work-driver)+ observer。v1 路径完全不动(FR-007/021)。
+        if self.state.is_v2:
+            return
         if len(self.state.chain) >= self.max_hops:
             await self._announce(f"⚙ 已转交 {self.max_hops} 次,我先收尾防止打转。")
             await self.state.emit("chain.revisit_limit", "coordinator", None,
@@ -639,6 +700,9 @@ class Coordinator:
         asyncio.create_task(worker.run())
 
     async def on_failed(self, event: AgentEvent) -> None:
+        # P3 (T014):v2 路径 step 失败兜底交给 observer stagnation,Coordinator 不 chain 兜底。
+        if self.state.is_v2:
+            return
         from_step = event.step_key or ""
         from_agent = event.agent_id
         from_disp = self._disp(from_agent)
@@ -658,6 +722,9 @@ class Coordinator:
                                "payload_hint": ""})
 
     async def on_needs_help(self, event: AgentEvent) -> None:
+        # P3 (T014):v2 路径不 chain 兜底(下游缺数据由 worker requires + observer 处理)。
+        if self.state.is_v2:
+            return
         # agent 声明缺数据 → 导演在群里 @ 上游,并真的把活送回上游让 ta 补
         from_agent = event.agent_id
         from_step = event.step_key or ""
@@ -688,6 +755,9 @@ class Coordinator:
             )
 
     async def on_needs_retry(self, event: AgentEvent) -> None:
+        # P3 (T014):v2 路径不 chain 介入 needs_retry。
+        if self.state.is_v2:
+            return
         # needs_retry 由 _run_step 内部已经处理一次(它有自己的 _retried flag)
         hint = (event.payload or {}).get("hint", "")[:120]
         if hint:
@@ -695,6 +765,50 @@ class Coordinator:
 
 
 # ───────────────────────────── 顶层 run ─────────────────────────────
+
+def _derive_goal(run: Any) -> str:
+    """从 TaskRun 派生原始汇报目标(P3, T009)。drift 判断 + gate_reject 文案用。"""
+    parts: list[str] = []
+    title = (getattr(run, "title", "") or "").strip()
+    rt = (getattr(run, "report_type", "") or "").strip()
+    aud = (getattr(run, "audience", "") or "").strip()
+    raw = (getattr(run, "raw_text", "") or "").strip()[:200]
+    if title:
+        parts.append(f"主题:{title}")
+    if rt:
+        parts.append(f"类型:{rt}")
+    if aud:
+        parts.append(f"汇报对象:{aud}")
+    if raw:
+        parts.append(f"要点:{raw}")
+    return " · ".join(parts) or "本次汇报"
+
+
+async def _bootstrap_first_step(
+    state: HarnessState, first_agent: str, steps_meta: list,
+) -> None:
+    """v2 起点 bootstrap(P3, T009/T023):触发第一棒,只一次(FR-005/006)。
+
+    emit task.start + 一条 bootstrap AgentSpeak(mentions=[first_agent]);
+    经 emit_v2 → dispatch → first_agent.enqueue_v2 → handle_v2_event SPEAK → 跑 step。
+    """
+    if state.bootstrapped:
+        return
+    state.bootstrapped = True
+    await state.emit("task.start", "coordinator", None,
+                     {"steps": [k for k, *_ in steps_meta]})
+    from .events_v2 import AgentSpeak
+    try:
+        ev = AgentSpeak(
+            task_id=getattr(state.run, "task_id", "") or "",
+            **{"from": "coordinator"},
+            text="开始整理这次的汇报材料。", intent="propose",
+            mentions=[first_agent], cc=[], artifact_updates=[],
+        )
+        await state.emit_v2(ev)
+    except Exception as e:  # noqa: BLE001 — FR-024 降级
+        log.warning("v2 bootstrap first step failed: %s", e)
+
 
 async def run_harness(
     *,
@@ -756,22 +870,31 @@ async def run_harness(
             state.subscriptions.register(agent_id, worker, profile)
             worker.start_v2_consumer()
 
-    await state.emit("task.start", "coordinator", None,
-                     {"steps": [k for k, *_ in steps_meta]})
-
-    # 起点 — 发起第一个 handoff,目标 = steps_meta[0]
     first_agent = steps_meta[0][1]
-    await state.emit("agent.handoff", "coordinator", None, {
-        "to": first_agent,
-        "reason": "起点,从资料员开始",
-        "payload_hint": "原始材料 + supplement + agent_briefs",
-    })
+    if is_v2:
+        # P3 (T010/T023):v2 路径 —— 启动 observer watchdog + 起点 bootstrap material;
+        # **不**走 Coordinator chain 起点 handoff(驱动交给 subscription work-driver)。
+        await state.start_observer(workers, _derive_goal(run))
+        await _bootstrap_first_step(state, first_agent, steps_meta)
+    else:
+        # v1 路径 —— 原 chain 起点(task.start + handoff to first_agent),完全不动。
+        await state.emit("task.start", "coordinator", None,
+                         {"steps": [k for k, *_ in steps_meta]})
+        await state.emit("agent.handoff", "coordinator", None, {
+            "to": first_agent,
+            "reason": "起点,从资料员开始",
+            "payload_hint": "原始材料 + supplement + agent_briefs",
+        })
 
     try:
         result_reason = await asyncio.wait_for(state.done, timeout=timeout_sec)
     except asyncio.TimeoutError:
         log.warning("harness · overall timeout after %ds", timeout_sec)
         result_reason = "overall_timeout"
+
+    # P3 (T010):任务结束停 observer watchdog(v1 路径 observer is None,空跑)。
+    if is_v2:
+        await state.stop_observer()
 
     # P2 (T028, research §F6):任务结束清理 v2 consume_loop task,避免泄漏。
     # v1 路径下 _consume_task 都是 None,本段空跑;cancel 异常容错。

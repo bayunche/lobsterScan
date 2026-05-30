@@ -2743,15 +2743,11 @@ async def execute(run: TaskRun) -> None:
         else "failed"
     )
 
-    # P1 v2 收尾:若本任务走 v2 路径,补一组 5 类示例事件 + 4 核心 artifact 版本化。
-    # v1 路径 / state 取不到都跳过,_persist_final 仍按原逻辑写 task.json(FR-002 / FR-020)。
-    if is_v2:
-        v2_state = harness_result.get("_state") if harness_result else None
-        if v2_state is not None:
-            try:
-                await _emit_v2_finalization(v2_state, run)
-            except Exception as e:  # noqa: BLE001
-                log.warning("v2 finalization wrapper failed: %s", e)
+    # P3 (T025, spec 003):v2 路径收尾已由 observer gatekeeper 接管 —— emit
+    # gate_pass/gate_reject + set done/partial(coordinator_observer._on_quiescence);
+    # 4 核心 artifact 版本化由 _emit_v2_step_overlay 在每个 step 完成时做。
+    # 因此**不再**调 _emit_v2_finalization(避免双 gate 事件 + 重复 artifact 版本,research F3)。
+    # _emit_v2_finalization 函数保留,供 P1 test_v2_integration 直接单测 v2 事件 schema。
 
     _persist_final(run)
     # coordinator 收尾发言

@@ -141,11 +141,32 @@ async def test_mention_triggers_speak_when_requires_satisfied(tmp_outputs_dir):
     state.done = asyncio.get_running_loop().create_future()
     state.subscriptions = SubscriptionRegistry()
 
-    async def _noop(*a, **kw):  # type: ignore[no-untyped-def]
-        return None
+    # P3 work-driver:依赖就绪 → **真跑 step**(而非 P2 的 emit confirm 气泡)。
+    # 给 worker 建一个 by_key step + mock run_step_fn,验证 step 被跑。
+    called = {"n": 0}
+
+    class _StubStep:
+        def __init__(self) -> None:
+            self.step = "html_design"
+            self.status = "pending"
+            self.output_json = None
+            self.output_text = ""
+            self.error = None
+            self.started_at = None
+            self.ended_at = None
+            self.total_tokens = 0
+
+    stub_step = _StubStep()
+    state.by_key["html_design"] = stub_step
+
+    async def _run_step(s, run, prev):  # type: ignore[no-untyped-def]
+        called["n"] += 1
+        s.status = "success"
+        s.output_json = {}
+
     w_html = AgentWorker(
-        agent_id="html-designer", step_key="html-designer",
-        state=state, run_step_fn=_noop, gate_review_fn=None,
+        agent_id="html-designer", step_key="html_design",
+        state=state, run_step_fn=_run_step, gate_review_fn=None,
     )
     state.subscriptions.register("html-designer", w_html, WORKER_PROFILE["html-designer"])
     w_html.start_v2_consumer()
@@ -167,19 +188,10 @@ async def test_mention_triggers_speak_when_requires_satisfied(tmp_outputs_dir):
             except asyncio.CancelledError:
                 pass
 
-    rows = [
-        json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    pe_responses = [
-        r for r in rows
-        if r.get("from") == "html-designer" and r.get("reply_to") == trigger.message_id
-    ]
-    assert len(pe_responses) == 1
-    assert pe_responses[0]["msg_type"] == "agent.speak", (
-        f"Script 已就绪时应 SPEAK;实际 {pe_responses[0]['msg_type']}"
-    )
-    assert pe_responses[0]["intent"] == "confirm"
+    # P3 work-driver:Script 就绪 → html-designer 被 work-driver 触发真跑 step
+    # (run_step_fn 被调用),而非 P2 的 emit confirm 气泡。
+    assert called["n"] == 1, "Script 就绪时 html-designer 应被 work-driver 触发跑 step"
+    assert stub_step.status == "success"
 
 
 @pytest.mark.asyncio

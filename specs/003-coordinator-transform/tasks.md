@@ -46,8 +46,8 @@ apps/web-backend/
 
 **Purpose**: 工作分支与开发环境就位(无新依赖,复用 P1/P2 的 pytest + pytest-asyncio)。
 
-- [ ] T001 确认工作分支 `003-coordinator-transform` 基于含 P1+P2 的 main;`uv sync --project apps/web-backend --extra test` 已执行;`pytest apps/web-backend/tests` 现有 61 case 全绿(P3 起点 baseline)
-- [ ] T002 [P] 在 `apps/web-backend/tests/orchestrator/conftest.py` 增补 `mock_drift` fixture(包装 `set_default_drift_judge` / `get_default_drift_judge`,yield 一个 `_make(drifted, text)` 工厂,teardown 还原),供 US4 drift 测试注入
+- [X] T001 确认工作分支 `003-coordinator-transform` 基于含 P1+P2 的 main;`uv sync --project apps/web-backend --extra test` 已执行;`pytest apps/web-backend/tests` 现有 61 case 全绿(P3 起点 baseline)
+- [X] T002 [P] 在 `apps/web-backend/tests/orchestrator/conftest.py` 增补 `mock_drift` fixture(包装 `set_default_drift_judge` / `get_default_drift_judge`,yield 一个 `_make(drifted, text)` 工厂,teardown 还原),供 US4 drift 测试注入
 
 ---
 
@@ -57,14 +57,14 @@ apps/web-backend/
 
 **⚠️ CRITICAL**: 本阶段未完成前,US1~US5 都不能开工。
 
-- [ ] T003 创建 `apps/web-backend/app/orchestrator/coordinator_observer.py`,加 module 头 + `log` logger + 4 个 env-var override 常量 `OBSERVER_TICK_SEC`(0.5)/ `DRIFT_EVERY_N_TICK`(10)/ `DRIFT_RECENT_K`(5)/ `STAGNATION_MAX_RETRY`(3)
-- [ ] T004 [P] 在 `coordinator_observer.py` 定义 `DriftVerdict` frozen dataclass(`drifted: bool` / `restate_text: str`)+ `DriftJudge` ABC(`async judge(goal, recent_speaks) -> DriftVerdict`)+ `NoDriftJudge` 默认实现(永远 `drifted=False`,不调 LLM)+ `get_default_drift_judge` / `set_default_drift_judge` 注入点(同 `agent_backend` 模式)
-- [ ] T005 [P] 在 `coordinator_observer.py` 定义 `GateResult` dataclass + `ArtifactGate` 类(`CORE` 4 元组 + `check(task_id) -> GateResult`,复用 `artifacts_v2.next_version`,latest = next_version-1;异常算缺失,FR-024 降级)
-- [ ] T006 在 `coordinator_observer.py` 定义 `CoordinatorObserver` dataclass 骨架:字段(state/workers/goal/gate/drift_judge/_task/_tick/_stagnation_retries)+ `start()` / `stop()`(asyncio task 起停,cancel+await 清理)+ `_loop()`(周期 sleep + tick + 调 `_is_quiescent`/`_on_quiescence`/`_check_drift` 占位)+ `_is_quiescent()`(inflight==0 + inbox 全空 + bootstrapped + 未完成);`_on_quiescence`/`_check_drift` 暂留 `pass`(US3/US5/US4 补)
-- [ ] T007 [P] 在 `coordinator_observer.py` 加 `_emit_intervene(kind, text)` helper(emit `CoordinatorIntervene(kind, text)`,复用 P1 events_v2;try/except 降级)+ `_recent_speaks(k)` / `_display(agent_id)` helper
-- [ ] T008 在 `apps/web-backend/app/orchestrator/harness.py` 给 `HarnessState` 加字段 `inflight_steps: int = 0` / `bootstrapped: bool = False` / `observer: "CoordinatorObserver | None" = None` + `start_observer(workers, goal)` / `stop_observer()` 方法(仅 is_v2 构造/启停,详 data-model §5)
-- [ ] T009 在 `harness.py` 加 `_derive_goal(run)` helper(从 `TaskRun` report_type/audience/raw_text 摘要拼原始目标字符串,drift + gate_reject 文案用)+ `_bootstrap_first_step(state, workers, first_agent)`(emit task.start + emit_v2 bootstrap AgentSpeak(mentions=[first_agent]);`bootstrapped` flag 去重,FR-005/006)
-- [ ] T010 在 `harness.py` `run_harness()` 加 is_v2 分支骨架:`is_v2` 时调 `state.start_observer(workers, _derive_goal(run))` + `_bootstrap_first_step(...)`(替代 line 764 chain 起点);末尾 `await state.stop_observer()`;**else 分支(v1)保留 line 764 chain 起点原样**。observer 的 `_on_quiescence` 仍是占位,本 task 只接线
+- [X] T003 创建 `apps/web-backend/app/orchestrator/coordinator_observer.py`,加 module 头 + `log` logger + 4 个 env-var override 常量 `OBSERVER_TICK_SEC`(0.5)/ `DRIFT_EVERY_N_TICK`(10)/ `DRIFT_RECENT_K`(5)/ `STAGNATION_MAX_RETRY`(3)
+- [X] T004 [P] 在 `coordinator_observer.py` 定义 `DriftVerdict` frozen dataclass(`drifted: bool` / `restate_text: str`)+ `DriftJudge` ABC(`async judge(goal, recent_speaks) -> DriftVerdict`)+ `NoDriftJudge` 默认实现(永远 `drifted=False`,不调 LLM)+ `get_default_drift_judge` / `set_default_drift_judge` 注入点(同 `agent_backend` 模式)
+- [X] T005 [P] 在 `coordinator_observer.py` 定义 `GateResult` dataclass + `ArtifactGate` 类(`CORE` 4 元组 + `check(task_id) -> GateResult`,复用 `artifacts_v2.next_version`,latest = next_version-1;异常算缺失,FR-024 降级)
+- [X] T006 在 `coordinator_observer.py` 定义 `CoordinatorObserver` dataclass 骨架:字段(state/workers/goal/gate/drift_judge/_task/_tick/_stagnation_retries)+ `start()` / `stop()`(asyncio task 起停,cancel+await 清理)+ `_loop()`(周期 sleep + tick + 调 `_is_quiescent`/`_on_quiescence`/`_check_drift` 占位)+ `_is_quiescent()`(inflight==0 + inbox 全空 + bootstrapped + 未完成);`_on_quiescence`/`_check_drift` 暂留 `pass`(US3/US5/US4 补)
+- [X] T007 [P] 在 `coordinator_observer.py` 加 `_emit_intervene(kind, text)` helper(emit `CoordinatorIntervene(kind, text)`,复用 P1 events_v2;try/except 降级)+ `_recent_speaks(k)` / `_display(agent_id)` helper
+- [X] T008 在 `apps/web-backend/app/orchestrator/harness.py` 给 `HarnessState` 加字段 `inflight_steps: int = 0` / `bootstrapped: bool = False` / `observer: "CoordinatorObserver | None" = None` + `start_observer(workers, goal)` / `stop_observer()` 方法(仅 is_v2 构造/启停,详 data-model §5)
+- [X] T009 在 `harness.py` 加 `_derive_goal(run)` helper(从 `TaskRun` report_type/audience/raw_text 摘要拼原始目标字符串,drift + gate_reject 文案用)+ `_bootstrap_first_step(state, workers, first_agent)`(emit task.start + emit_v2 bootstrap AgentSpeak(mentions=[first_agent]);`bootstrapped` flag 去重,FR-005/006)
+- [X] T010 在 `harness.py` `run_harness()` 加 is_v2 分支骨架:`is_v2` 时调 `state.start_observer(workers, _derive_goal(run))` + `_bootstrap_first_step(...)`(替代 line 764 chain 起点);末尾 `await state.stop_observer()`;**else 分支(v1)保留 line 764 chain 起点原样**。observer 的 `_on_quiescence` 仍是占位,本 task 只接线
 
 **Checkpoint**: `coordinator_observer.py` 类型 + watchdog 框架 + HarnessState 字段就位;v2 任务能 bootstrap 起点 + observer 空转;v1 路径零开销。可启动 US1~US5。
 
@@ -78,15 +78,15 @@ apps/web-backend/
 
 ### Tests for US1（必写 — SC-001 验收依赖）
 
-- [ ] T011 [P] [US1] 在 `apps/web-backend/tests/orchestrator/test_v1_regression.py` 扩 case:v1 `run_harness` 跑完,断言 `state.observer is None` 且 `state.inflight_steps == 0` 且 `state.bootstrapped == False`
-- [ ] T012 [P] [US1] 在 `test_v1_regression.py` 扩 case:v1 路径 `Coordinator.on_handoff` **不** short-circuit(仍 chain 路由)—— 断言 v1 任务的 chain 推进与 P2 baseline 一致(用 spy 或断言 on_handoff 实际 dispatch 了 worker.run)
-- [ ] T013 [P] [US1] 在 `test_v1_regression.py` 扩 case:v1 路径 events.jsonl 无 P3 新行为痕迹(grep 无 `kind=stagnation/drift/gate_pass/gate_reject` 的 coordinator.intervene;且无 bootstrap AgentSpeak)
+- [X] T011 [P] [US1] 在 `apps/web-backend/tests/orchestrator/test_v1_regression.py` 扩 case:v1 `run_harness` 跑完,断言 `state.observer is None` 且 `state.inflight_steps == 0` 且 `state.bootstrapped == False`
+- [X] T012 [P] [US1] 在 `test_v1_regression.py` 扩 case:v1 路径 `Coordinator.on_handoff` **不** short-circuit(仍 chain 路由)—— 断言 v1 任务的 chain 推进与 P2 baseline 一致(用 spy 或断言 on_handoff 实际 dispatch 了 worker.run)
+- [X] T013 [P] [US1] 在 `test_v1_regression.py` 扩 case:v1 路径 events.jsonl 无 P3 新行为痕迹(grep 无 `kind=stagnation/drift/gate_pass/gate_reject` 的 coordinator.intervene;且无 bootstrap AgentSpeak)
 
 ### Implementation for US1
 
-- [ ] T014 [US1] 在 `harness.py` `Coordinator.on_handoff` / `on_failed` / `on_needs_help` / `on_needs_retry` 各加第一行 `if self.state.is_v2: return`(short-circuit;v1 路径完全不动,详 data-model §7);通过 T012 验证
-- [ ] T015 [US1] 在 `harness.py` 确认 `run_harness` 的 v1 分支(is_v2=False)不构造 observer、不 bootstrap、走 line 764 chain 起点;通过 T011 验证
-- [ ] T016 [US1] 运行 `pytest test_v1_regression.py` + P1/P2 全量 61 case,确认 v1 字段级零回归(SC-001 测试级守护)
+- [X] T014 [US1] 在 `harness.py` `Coordinator.on_handoff` / `on_failed` / `on_needs_help` / `on_needs_retry` 各加第一行 `if self.state.is_v2: return`(short-circuit;v1 路径完全不动,详 data-model §7);通过 T012 验证
+- [X] T015 [US1] 在 `harness.py` 确认 `run_harness` 的 v1 分支(is_v2=False)不构造 observer、不 bootstrap、走 line 764 chain 起点;通过 T011 验证
+- [X] T016 [US1] 运行 `pytest test_v1_regression.py` + P1/P2 全量 61 case,确认 v1 字段级零回归(SC-001 测试级守护)
 
 **Checkpoint**: v1 任务行为与含 P1+P2 的 main 字段级相同。MVP 红线达成。
 
@@ -100,19 +100,19 @@ apps/web-backend/
 
 ### Tests for US2（必写 — FR-025/026 + SC-002/003 验收依赖）
 
-- [ ] T017 [P] [US2] 创建 `apps/web-backend/tests/orchestrator/test_v2_workdriver.py`,加 case:`handle_v2_event` SPEAK 分支真跑 `_run_unlocked`(断言 step 产出 artifact + `inflight_steps` 在跑时 +1 跑完归 0),而非 emit confirm 气泡
-- [ ] T018 [P] [US2] 在 `test_v2_workdriver.py` 加 case:`_bootstrap_first_step` 触发 material 第一棒(material 被 enqueue + SPEAK + 跑 step),不经 Coordinator chain handoff
-- [ ] T019 [P] [US2] 在 `test_v2_workdriver.py` 加 case:v2 路径 `Coordinator.on_handoff` short-circuit(被 emit 的 agent.handoff 不 dispatch worker.run,用 spy 断言 0 次 chain dispatch)
-- [ ] T020 [US2] 在 `test_v2_workdriver.py` 加端到端 case:`ScriptedBackend` 喂 8 step 脚本 → `run_harness(is_v2=True)` → 断言 8 step 全由 subscription 链式驱动产出、`result["reason"]=="done"`、backend.i==8(SC-002)
+- [X] T017 [P] [US2] 创建 `apps/web-backend/tests/orchestrator/test_v2_workdriver.py`,加 case:`handle_v2_event` SPEAK 分支真跑 `_run_unlocked`(断言 step 产出 artifact + `inflight_steps` 在跑时 +1 跑完归 0),而非 emit confirm 气泡
+- [X] T018 [P] [US2] 在 `test_v2_workdriver.py` 加 case:`_bootstrap_first_step` 触发 material 第一棒(material 被 enqueue + SPEAK + 跑 step),不经 Coordinator chain handoff
+- [X] T019 [P] [US2] 在 `test_v2_workdriver.py` 加 case:v2 路径 `Coordinator.on_handoff` short-circuit(被 emit 的 agent.handoff 不 dispatch worker.run,用 spy 断言 0 次 chain dispatch)
+- [X] T020 [US2] 在 `test_v2_workdriver.py` 加端到端 case:`ScriptedBackend` 喂 8 step 脚本 → `run_harness(is_v2=True)` → 断言 8 step 全由 subscription 链式驱动产出、`result["reason"]=="done"`、backend.i==8(SC-002)
 
 ### Implementation for US2
 
-- [ ] T021 [US2] 在 `harness.py` `AgentWorker.handle_v2_event` 改 SPEAK 分支(line ~367):从 emit confirm AgentSpeak 改为 `inflight_steps += 1` → `await self._run_unlocked()` → `finally inflight_steps -= 1`(lock 已持有,详 data-model §6);SILENT/IGNORE/锁超时分支保留 P2 行为
-- [ ] T022 [US2] 在 `harness.py` 确认 `_run_unlocked` 末尾的 `_emit_v2_step_overlay`(P2 已落地)在 work-driver 路径正常 emit `AgentSpeak(mentions=[下一棒])`,驱动下游订阅唤醒(链式闭环,research §3);如需小调适配 v2 驱动则就地改
-- [ ] T023 [US2] 在 `harness.py` 落实 `_bootstrap_first_step`(T009 已建骨架)真正 emit_v2 bootstrap AgentSpeak 并经 dispatch 唤醒 material;通过 T018 验证
-- [ ] T024 [US2] 在 `harness.py` 落实 `Coordinator.on_handoff` 的 is_v2 short-circuit(T014 已加),确认 v2 路径 worker 跑完 emit 的 agent.handoff 不触发 chain dispatch;通过 T019 验证
-- [ ] T025 [US2] 在 `apps/web-backend/app/orchestrator/pipeline.py` 调整 v2 收尾:`_emit_v2_finalization` 在 v2 路径收窄(gatekeeper 接管收尾后避免与 gate_pass/reject 重复 emit,research F3);保留 v1 行为
-- [ ] T026 [US2] 运行 `pytest test_v2_workdriver.py`,确认 work-driver 转换 + bootstrap + 链式闭环全绿(SC-002/003)
+- [X] T021 [US2] 在 `harness.py` `AgentWorker.handle_v2_event` 改 SPEAK 分支(line ~367):从 emit confirm AgentSpeak 改为 `inflight_steps += 1` → `await self._run_unlocked()` → `finally inflight_steps -= 1`(lock 已持有,详 data-model §6);SILENT/IGNORE/锁超时分支保留 P2 行为
+- [X] T022 [US2] 在 `harness.py` 确认 `_run_unlocked` 末尾的 `_emit_v2_step_overlay`(P2 已落地)在 work-driver 路径正常 emit `AgentSpeak(mentions=[下一棒])`,驱动下游订阅唤醒(链式闭环,research §3);如需小调适配 v2 驱动则就地改
+- [X] T023 [US2] 在 `harness.py` 落实 `_bootstrap_first_step`(T009 已建骨架)真正 emit_v2 bootstrap AgentSpeak 并经 dispatch 唤醒 material;通过 T018 验证
+- [X] T024 [US2] 在 `harness.py` 落实 `Coordinator.on_handoff` 的 is_v2 short-circuit(T014 已加),确认 v2 路径 worker 跑完 emit 的 agent.handoff 不触发 chain dispatch;通过 T019 验证
+- [X] T025 [US2] 在 `apps/web-backend/app/orchestrator/pipeline.py` 调整 v2 收尾:`_emit_v2_finalization` 在 v2 路径收窄(gatekeeper 接管收尾后避免与 gate_pass/reject 重复 emit,research F3);保留 v1 行为
+- [X] T026 [US2] 运行 `pytest test_v2_workdriver.py`,确认 work-driver 转换 + bootstrap + 链式闭环全绿(SC-002/003)
 
 **Checkpoint**: v2 任务由 subscription 链式驱动闭环,Coordinator 不 chain 派单。US2 可独立验证(配合 US5 gatekeeper 才能真收尾 done;本阶段可先用"8 step 跑完 + 手动断言 artifact 齐"验证驱动闭环)。
 
@@ -126,16 +126,16 @@ apps/web-backend/
 
 ### Tests for US3（必写 — FR-025 + SC-004 验收依赖）
 
-- [ ] T027 [P] [US3] 创建 `apps/web-backend/tests/orchestrator/test_observer.py`,加 case:`_is_quiescent` 双条件(inbox 全空 + inflight==0 + bootstrapped + 未完成)真值表 —— 有 inflight 或 inbox 非空时返回 False
-- [ ] T028 [P] [US3] 在 `test_observer.py` 加 case:死锁场景(worker 全 silent,某 artifact 缺但有"依赖就绪却没产出"的 worker)→ observer `_on_quiescence` emit `intervene(kind=stagnation)` 并重新 enqueue 激活该 worker
-- [ ] T029 [P] [US3] 在 `test_observer.py` 加 case:stagnation 激活**不指定 next-speaker**(只激活依赖满足却静默者;断言激活集合 = 满足 requires 且未产出自己 artifact 的 worker,FR-011)
-- [ ] T030 [P] [US3] 在 `test_observer.py` 加 case:stagnation 反复无解(无可激活 worker)达 `STAGNATION_MAX_RETRY` → 进入收尾(set done partial),不无限 intervene(FR-012/SC-004)
+- [X] T027 [P] [US3] 创建 `apps/web-backend/tests/orchestrator/test_observer.py`,加 case:`_is_quiescent` 双条件(inbox 全空 + inflight==0 + bootstrapped + 未完成)真值表 —— 有 inflight 或 inbox 非空时返回 False
+- [X] T028 [P] [US3] 在 `test_observer.py` 加 case:死锁场景(worker 全 silent,某 artifact 缺但有"依赖就绪却没产出"的 worker)→ observer `_on_quiescence` emit `intervene(kind=stagnation)` 并重新 enqueue 激活该 worker
+- [X] T029 [P] [US3] 在 `test_observer.py` 加 case:stagnation 激活**不指定 next-speaker**(只激活依赖满足却静默者;断言激活集合 = 满足 requires 且未产出自己 artifact 的 worker,FR-011)
+- [X] T030 [P] [US3] 在 `test_observer.py` 加 case:stagnation 反复无解(无可激活 worker)达 `STAGNATION_MAX_RETRY` → 进入收尾(set done partial),不无限 intervene(FR-012/SC-004)
 
 ### Implementation for US3
 
-- [ ] T031 [US3] 在 `coordinator_observer.py` 实现 `_on_quiescence` 的 stagnation 部分:`_activate_ready_silent_workers()`(找 requires 全满足但本任务未产出自己 artifact 的 worker → 给它 enqueue 一条 stagnation 触发事件 + emit `intervene(kind=stagnation)`)+ `_stagnation_retries` 累计逻辑(详 data-model §4)
-- [ ] T032 [US3] 在 `coordinator_observer.py` 实现 `_is_quiescent`(T006 骨架)的完整双条件判定;接通 `_loop` 周期调用
-- [ ] T033 [US3] 运行 `pytest test_observer.py`(stagnation 部分),确认死锁检测 + 激活 + 无解兜底全绿(SC-004)
+- [X] T031 [US3] 在 `coordinator_observer.py` 实现 `_on_quiescence` 的 stagnation 部分:`_activate_ready_silent_workers()`(找 requires 全满足但本任务未产出自己 artifact 的 worker → 给它 enqueue 一条 stagnation 触发事件 + emit `intervene(kind=stagnation)`)+ `_stagnation_retries` 累计逻辑(详 data-model §4)
+- [X] T032 [US3] 在 `coordinator_observer.py` 实现 `_is_quiescent`(T006 骨架)的完整双条件判定;接通 `_loop` 周期调用
+- [X] T033 [US3] 运行 `pytest test_observer.py`(stagnation 部分),确认死锁检测 + 激活 + 无解兜底全绿(SC-004)
 
 **Checkpoint**: v2 链卡住时 observer 守住 liveness,任务不死锁。US3 可独立验证。
 
@@ -149,15 +149,15 @@ apps/web-backend/
 
 ### Tests for US5（必写 — FR-025 + SC-006 验收依赖）
 
-- [ ] T034 [P] [US5] 在 `test_observer.py` 加 case:`ArtifactGate.check` —— 4 核心 artifact 都有 latest≥1 → passed;缺某个 → `missing` 含该 id
-- [ ] T035 [P] [US5] 在 `test_observer.py` 加 case:quiescence + artifact 齐 → observer emit `intervene(kind=gate_pass)` + `state.done` set "done"
-- [ ] T036 [P] [US5] 在 `test_observer.py` 加 case:quiescence + 缺失 + 无可激活 worker(无解)→ emit `intervene(kind=gate_reject)` 点名缺失上游(业务化中文)+ `state.done` set "partial"
-- [ ] T037 [P] [US5] 在 `test_observer.py` 加 case:任意收尾路径都给出确定终止状态码(done/partial),`state.done` 必被 set,无挂起(FR-020/SC-006)
+- [X] T034 [P] [US5] 在 `test_observer.py` 加 case:`ArtifactGate.check` —— 4 核心 artifact 都有 latest≥1 → passed;缺某个 → `missing` 含该 id
+- [X] T035 [P] [US5] 在 `test_observer.py` 加 case:quiescence + artifact 齐 → observer emit `intervene(kind=gate_pass)` + `state.done` set "done"
+- [X] T036 [P] [US5] 在 `test_observer.py` 加 case:quiescence + 缺失 + 无可激活 worker(无解)→ emit `intervene(kind=gate_reject)` 点名缺失上游(业务化中文)+ `state.done` set "partial"
+- [X] T037 [P] [US5] 在 `test_observer.py` 加 case:任意收尾路径都给出确定终止状态码(done/partial),`state.done` 必被 set,无挂起(FR-020/SC-006)
 
 ### Implementation for US5
 
-- [ ] T038 [US5] 在 `coordinator_observer.py` 实现 `_on_quiescence` 的 gatekeeper 部分:调 `ArtifactGate.check` → 齐 emit `gate_pass` + `state.done.set_result("done")`;无解 emit `gate_reject` 点名缺失(`_display` 翻中文)+ `state.done.set_result("partial")`(详 data-model §4/§7);与 T031 stagnation 部分合成完整 `_on_quiescence`
-- [ ] T039 [US5] 运行 `pytest test_observer.py`(gatekeeper 部分)+ 回头补跑 T020 端到端(此时 gatekeeper 接管收尾,8 step 闭环应真 done),确认 gate 齐/缺两路 + 端到端 done 全绿(SC-006)
+- [X] T038 [US5] 在 `coordinator_observer.py` 实现 `_on_quiescence` 的 gatekeeper 部分:调 `ArtifactGate.check` → 齐 emit `gate_pass` + `state.done.set_result("done")`;无解 emit `gate_reject` 点名缺失(`_display` 翻中文)+ `state.done.set_result("partial")`(详 data-model §4/§7);与 T031 stagnation 部分合成完整 `_on_quiescence`
+- [X] T039 [US5] 运行 `pytest test_observer.py`(gatekeeper 部分)+ 回头补跑 T020 端到端(此时 gatekeeper 接管收尾,8 step 闭环应真 done),确认 gate 齐/缺两路 + 端到端 done 全绿(SC-006)
 
 **Checkpoint**: gatekeeper 收尾把关,v2 任务有确定终止状态。US2+US3+US5 合起来 = v2 路径完整闭环(work-driver + liveness + 收尾),**不依赖宪章修订即可交付**。
 
@@ -173,19 +173,19 @@ apps/web-backend/
 
 ### Phase 0 前置（宪章修订,阻塞本 user story）
 
-- [ ] T040 [US4] 走 `/speckit-constitution` 把 `.specify/memory/constitution.md` 原则 IV / 关联 §9.4.7 决策 1 的"Coordinator 是**纯**规则引擎"放宽为"observer 的 drift 判断允许一次受限 LLM 调用(只发声/不路由/不审质量/不改产物/minimal context)";版本 1.0.0 → 1.1.0,commit 标 `constitution: 1.0.0 → 1.1.0` + 理由。**此 task 不完成,T041-T046 全部阻塞**
+- [X] T040 [US4] 走 `/speckit-constitution` 把 `.specify/memory/constitution.md` 原则 IV / 关联 §9.4.7 决策 1 的"Coordinator 是**纯**规则引擎"放宽为"observer 的 drift 判断允许一次受限 LLM 调用(只发声/不路由/不审质量/不改产物/minimal context)";版本 1.0.0 → 1.1.0,commit 标 `constitution: 1.0.0 → 1.1.0` + 理由。**此 task 不完成,T041-T046 全部阻塞**
 
 ### Tests for US4（必写 — FR-025 + SC-005 验收依赖;依赖 T040）
 
-- [ ] T041 [P] [US4] 创建 `apps/web-backend/tests/orchestrator/test_drift.py`,用 `mock_drift` fixture 加 case:drifted=True → observer `_check_drift` emit `intervene(kind=drift)` 复诵文案
-- [ ] T042 [P] [US4] 在 `test_drift.py` 加 case:drifted=False → 不 emit drift 事件(链式推进不受打扰)
-- [ ] T043 [P] [US4] 在 `test_drift.py` 加 case:注入一个 `judge` 抛异常的 stub → `_check_drift` 仅 log warn,任务不挂、不 failed(FR-017 降级)
-- [ ] T044 [P] [US4] 在 `test_drift.py` 加 case:drift intervene **不路由 next-speaker、不改产物**(断言 emit 的 CoordinatorIntervene 无 mentions 语义、不触发 worker.run、artifact 版本不变,FR-016)
+- [X] T041 [P] [US4] 创建 `apps/web-backend/tests/orchestrator/test_drift.py`,用 `mock_drift` fixture 加 case:drifted=True → observer `_check_drift` emit `intervene(kind=drift)` 复诵文案
+- [X] T042 [P] [US4] 在 `test_drift.py` 加 case:drifted=False → 不 emit drift 事件(链式推进不受打扰)
+- [X] T043 [P] [US4] 在 `test_drift.py` 加 case:注入一个 `judge` 抛异常的 stub → `_check_drift` 仅 log warn,任务不挂、不 failed(FR-017 降级)
+- [X] T044 [P] [US4] 在 `test_drift.py` 加 case:drift intervene **不路由 next-speaker、不改产物**(断言 emit 的 CoordinatorIntervene 无 mentions 语义、不触发 worker.run、artifact 版本不变,FR-016)
 
 ### Implementation for US4（依赖 T040）
 
-- [ ] T045 [US4] 在 `coordinator_observer.py` 接通 `_check_drift`(T006 占位):取 `_recent_speaks(DRIFT_RECENT_K)` + `goal` → `await self.drift_judge.judge(...)` → drifted 则 `_emit_intervene("drift", restate_text)`;try/except 降级(FR-017);`_loop` 中每 `DRIFT_EVERY_N_TICK` 拍调一次
-- [ ] T046 [US4] 运行 `pytest test_drift.py`,确认 drift 4 分支(drifted/not/crash/不路由)全绿(SC-005);确认默认 `NoDriftJudge` 下 drift 永不触发(不破坏 US2/US3/US5 测试)
+- [X] T045 [US4] 在 `coordinator_observer.py` 接通 `_check_drift`(T006 占位):取 `_recent_speaks(DRIFT_RECENT_K)` + `goal` → `await self.drift_judge.judge(...)` → drifted 则 `_emit_intervene("drift", restate_text)`;try/except 降级(FR-017);`_loop` 中每 `DRIFT_EVERY_N_TICK` 拍调一次
+- [X] T046 [US4] 运行 `pytest test_drift.py`,确认 drift 4 分支(drifted/not/crash/不路由)全绿(SC-005);确认默认 `NoDriftJudge` 下 drift 永不触发(不破坏 US2/US3/US5 测试)
 
 **Checkpoint**: drift 纠偏可用(mock 注入测试级);真 LLM 判断(LLMDriftJudge)随 Windows issue 解决后补。US4 在 T040 宪章修订后可独立验证。
 
@@ -195,12 +195,12 @@ apps/web-backend/
 
 **Purpose**: 跨 user story 的红线自检 + 文档收尾。建议在 US1~US5 都 checkpoint 通过后串行执行。
 
-- [ ] T047 [P] grep 红线审计:`grep -rn 'stagnation\|drift\|gatekeeper\|bootstrap\|quiescence\|inflight\|_resolve_target' apps/web-backend/app/api/ apps/web-frontend/ apps/admin-frontend/`(src)应 0 命中(FR-023 + SC-008)
-- [ ] T048 [P] `pnpm --filter web-frontend build` + `pnpm --filter admin-frontend build` 全绿(P3 不动 UI,防御性 — SC-009)
-- [ ] T049 [P] 运行 `apps/web-backend` 全量 pytest,确认 P1(32)+ P2(29)+ P3(新增 US1~US5)全绿,0 回归
+- [X] T047 [P] grep 红线审计:`grep -rn 'stagnation\|drift\|gatekeeper\|bootstrap\|quiescence\|inflight\|_resolve_target' apps/web-backend/app/api/ apps/web-frontend/ apps/admin-frontend/`(src)应 0 命中(FR-023 + SC-008)
+- [X] T048 [P] `pnpm --filter web-frontend build` + `pnpm --filter admin-frontend build` 全绿(P3 不动 UI,防御性 — SC-009)
+- [X] T049 [P] 运行 `apps/web-backend` 全量 pytest,确认 P1(32)+ P2(29)+ P3(新增 US1~US5)全绿,0 回归
 - [ ] T050 v1 baseline diff(SC-001,需真 LLM 管线):main vs 003 分支跑 5 个 v1 demo → diff events.jsonl/script.md/task.json 字段级相同。**挂 Windows issue;环境可跑时人工执行**(同 P2 T038 性质)
 - [ ] T051 [P] v2 真 LLM 闭环验收(SC-002 真任务版):harness_version=v2 demo 跑通 8 agent 链式闭环 + observer 收尾。**挂 Windows issue;环境可跑时人工执行**(同 P2 T040 性质;ScriptedBackend 测试级已由 T020/T039 覆盖)
-- [ ] T052 在 `CLAUDE.md` SPECKIT 块把 P3 状态从 (planning) 改为 ✅ Implemented;补 `coordinator_observer.py` 代码摘要 + 测试统计;`docs/开发文档.md` §9.4.5 P3 行标已落地
+- [X] T052 在 `CLAUDE.md` SPECKIT 块把 P3 状态从 (planning) 改为 ✅ Implemented;补 `coordinator_observer.py` 代码摘要 + 测试统计;`docs/开发文档.md` §9.4.5 P3 行标已落地
 
 ---
 

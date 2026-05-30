@@ -191,3 +191,40 @@ def stub_state_v1(stub_state):
     def _make(task_id: str, events_jsonl: Path | str) -> StubState:
         return stub_state(task_id, events_jsonl, is_v2=False)
     return _make
+
+
+@pytest.fixture
+def mock_drift():
+    """便利 fixture · P3 drift 测试：注入 mock DriftJudge,teardown 还原（T002）。
+
+    延迟 import coordinator_observer（避免模块未建时 collection 失败）。
+
+    用法：
+        def test_xxx(mock_drift):
+            judge = mock_drift(drifted=True, text="请回到主题")
+            # ... 跑 observer._check_drift → 断言 emit intervene(kind=drift)
+    """
+    from app.orchestrator.coordinator_observer import (
+        DriftJudge, DriftVerdict, get_default_drift_judge, set_default_drift_judge,
+    )
+
+    original = get_default_drift_judge()
+
+    class _StubDriftJudge(DriftJudge):
+        def __init__(self, verdict: DriftVerdict, raise_exc: bool = False) -> None:
+            self._verdict = verdict
+            self._raise = raise_exc
+
+        async def judge(self, *, goal, recent_speaks) -> DriftVerdict:
+            if self._raise:
+                raise RuntimeError("drift judge boom (test)")
+            return self._verdict
+
+    def _make(drifted: bool = False, text: str = "请回到本次汇报主题",
+              raise_exc: bool = False) -> _StubDriftJudge:
+        judge = _StubDriftJudge(DriftVerdict(drifted=drifted, restate_text=text), raise_exc)
+        set_default_drift_judge(judge)
+        return judge
+
+    yield _make
+    set_default_drift_judge(original)
