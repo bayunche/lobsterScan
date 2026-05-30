@@ -58,8 +58,13 @@ async def catalog() -> list[dict]:
         src = _find_skill(name)
         installed_in = []
         for ws in WS_ROOT.iterdir():
-            if (ws / ".agents" / "skills" / name).exists():
-                installed_in.append(ws.name)
+            try:
+                if (ws / ".agents" / "skills" / name).exists():
+                    installed_in.append(ws.name)
+            except OSError:
+                # Windows 上损坏/不可达 symlink 会让 .exists() 抛 OSError(WinError 1920)
+                # 而非返回 False — 当作未安装,不让单个坏 symlink crash 整个 catalog。
+                pass
         out.append({
             "name": name,
             "category": cat,
