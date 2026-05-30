@@ -32,7 +32,7 @@
 | **Project Type** | web-service(`apps/web-backend`,monorepo 单后端) |
 | **Performance Goals** | v1 路径 0 性能回归(baseline = P2 之后 main);v2 observer watchdog 轮询开销 < 1ms/拍(in-memory inbox/inflight 查询);tick 0.5s 不显著占 CPU |
 | **Constraints** | 100% 向后兼容(v1 + P1/P2 v2 现有行为保留);100% 无外部新依赖;Coordinator class 仅加 short-circuit,内部逻辑不动;drift 真实现受宪章 + 环境双前置 |
-| **Scale/Scope** | 新增 `coordinator_observer.py` ~280 行;扩展 `harness.py` ~120 行(handle_v2_event work-driver + Coordinator short-circuit + run_harness bootstrap/observer);调整 `pipeline.py` ~30 行(v2 收尾收窄);新增单测 ~350 行 |
+| **Scale/Scope** | 新增 `coordinator_observer.py` ~310 行;扩展 `harness.py` ~150 行(handle_v2_event work-driver + step-success 去重 + force_run_v2 + Coordinator short-circuit + run_harness bootstrap/observer);调整 `pipeline.py`(v2 收尾改 observer 接管);新增单测 ~400 行(81 tests 全绿) |
 
 ---
 
@@ -45,10 +45,10 @@
 | **I. 用户可见层脱敏** | ✅ PASS | FR-023 禁 `_resolve_target/stagnation/drift/gatekeeper/bootstrap/quiescence` 出现在用户可见层;`coordinator.intervene` 经现有翻译层渲染中文气泡;SC-008 grep 兜底 |
 | **II. 中文为产品语言** | ✅ PASS | P3 不动 UI;observer emit 的 intervene text 业务化中文("全部产物齐了,收尾"/"流程卡住了,我来推进一下") |
 | **III. 降级而非崩溃** | ✅ PASS | FR-024:work-driver / stagnation / drift / gate 异常全 try/except 降级;drift LLM 失败跳过(FR-017);gatekeeper 必给确定终止状态(FR-020) |
-| **IV. Coordinator / Reviewer 边界** | ⚠️ **需 Phase 0 宪章修订** | drift 让 Coordinator 调一次 LLM,突破"纯规则引擎"(§9.4.7 决策 1)。**P3 实施第一步 MUST 走 `/speckit-constitution` 放宽该条(1.0.0→1.1.0)**;放宽后其余红线(不路由 next-speaker / 不审质量 / 不改产物)仍守(FR-011/016)。Reviewer 不动(P4 才动) |
+| **IV. Coordinator / Reviewer 边界** | ✅ PASS(宪章 1.1.0 已落地) | drift 让 Coordinator 调一次 LLM,突破"纯规则引擎"(§9.4.7 决策 1)。**Phase 0 宪章修订已完成**(commit `edf1621`,原则 IV 新增 drift 受限 LLM 例外,1.0.0→1.1.0);放宽后其余红线(不路由 next-speaker / 不审质量 / 不改产物)仍守(FR-011/016,`test_drift_does_not_route_or_mutate` 验证)。Reviewer 不动(P4 才动) |
 | **V. Agent 自治与隔离** | ✅ PASS | per-agent lock 沿用 P2;work-driver 跑 step 仍走同一把锁;agentDir 不共享红线不变 |
 
-**Gate 结论**:**有条件通过**。原则 IV 的 drift 部分需 Phase 0 宪章修订作为前置(已在 spec Dependencies + 本节显式声明)。**US1/US2/US3/US5 不依赖宪章修订,可先行实施**;US4(drift)被宪章修订阻塞。这不是"未justify的违规",而是"按宪章 §Governance 流程先升级宪章再实施"——合规路径。
+**Gate 结论**:**通过**。原则 IV 的 drift 部分以 Phase 0 宪章修订为前置 —— **该修订已落地**(commit `edf1621`,宪章 1.0.0→1.1.0)。这是"按宪章 §Governance 流程先升级宪章再实施"的合规路径,非"未 justify 的违规"。(历史:本表初版写于宪章修订前,标 ⚠️ 待修订;现已更新为 PASS。)
 
 Complexity Tracking:见下节(1 项 justified)。
 
@@ -141,7 +141,7 @@ Phase 1 设计完成后回核 5 大原则:
 | I 脱敏 | ✅ 新字段(inflight_steps/bootstrapped/observer)+ DriftJudge/ArtifactGate 全在内部;intervene 文案中文;不进 SSE/导出层 |
 | II 中文 | ✅ observer emit 的 4 类 intervene text 业务化中文 |
 | III 降级 | ✅ observer `_loop`/drift/gate 全 try/except;drift 失败跳过;gatekeeper 必给 done/partial |
-| IV 边界 | ⚠️ drift 需 Phase 0 宪章修订(已 justify);放宽后限定严格(不路由/不审质量/minimal context);Coordinator class 仅 4 行 short-circuit;Reviewer 不动 |
+| IV 边界 | ✅ drift 的 Phase 0 宪章修订已落地(1.1.0);放宽后限定严格(不路由/不审质量/minimal context);Coordinator class 仅 4 行 short-circuit;Reviewer 不动 |
 | V 隔离 | ✅ work-driver 跑 step 走 P2 per-agent lock;agentDir 不共享不变 |
 
 **Re-check 结论**:通过(原则 IV 的 Phase 0 宪章前置已明确为实施第一步)。可进 `/speckit-tasks`。

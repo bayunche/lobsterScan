@@ -219,6 +219,11 @@ finally:
 - `_run_unlocked` 末尾 emit `agent.handoff` → v2 路径 Coordinator.on_handoff short-circuit(决策 0),不双驱动
 - SILENT / IGNORE / 锁超时降级分支:全部保留 P2 行为
 - v1 路径:handle_v2_event 不被调用(inbox 仅 v2 构造),零影响
+- **step-success 去重(实现期补)**:`_emit_v2_step_overlay` 对每个 step 既 emit
+  `artifact.update`(write_versioned)又 emit `agent.speak(mentions=[下一棒])`,**下游会被
+  这两条路径各触发一次**。SPEAK 分支跑 `_run_unlocked` 前检查 `by_key[step_key].status
+  == "success"`,已成功则跳过 —— 配合 per-agent lock 串行,保证同一 step 在任务内**只真跑
+  一次**。(此双触发去重在 spec/data-model 设计期未预见,实现时发现并补;见 analyze U1)
 
 ---
 
@@ -247,7 +252,7 @@ async def run_harness(*, ..., is_v2=False) -> dict:
         # P3：起点 bootstrap + 启动 observer
         goal = _derive_goal(run)                          # report_type/audience/raw_text 摘要
         await state.start_observer(workers, goal)
-        await _bootstrap_first_step(state, workers, steps_meta[0][1])
+        await _bootstrap_first_step(state, steps_meta[0][1], steps_meta)
     else:
         await state.emit("task.start", ...)               # v1 原样
         await state.emit("agent.handoff", "coordinator", None, {...})  # v1 chain 起点
@@ -260,12 +265,15 @@ async def run_harness(*, ..., is_v2=False) -> dict:
     return {...}
 
 
-async def _bootstrap_first_step(state, workers, first_agent) -> None:
+# 实现签名：_bootstrap_first_step(state, first_agent, steps_meta)
+# (不需 workers dict；需 steps_meta 发 task.start 的 steps 列表)
+async def _bootstrap_first_step(state, first_agent, steps_meta) -> None:
     """触发 material 第一棒（FR-005/006，只一次）。"""
     if state.bootstrapped:
         return
     state.bootstrapped = True
-    await state.emit("task.start", "coordinator", None, {...})  # task.start 仍发
+    await state.emit("task.start", "coordinator", None,
+                     {"steps": [k for k, *_ in steps_meta]})
     ev = AgentSpeak(task_id=state.run.task_id, **{"from": "coordinator"},
                     text="开始整理这次的汇报材料。", intent="propose",
                     mentions=[first_agent])
