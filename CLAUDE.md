@@ -175,31 +175,32 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P3 — Coordinator 转型(observer + gatekeeper)+ subscription work-driver** ✅ Implemented
-- Plan:       `specs/003-coordinator-transform/plan.md`
-- Spec:       `specs/003-coordinator-transform/spec.md`
-- Research:   `specs/003-coordinator-transform/research.md` (9 decisions + 4 派生发现)
-- Data model: `specs/003-coordinator-transform/data-model.md`
-- Quickstart: `specs/003-coordinator-transform/quickstart.md`
-- Tasks:      `specs/003-coordinator-transform/tasks.md` (T040 宪章修订 ✅ 1.1.0;US1-US5 + 实现 + 测试全绿;T050 v1 baseline diff + T051 v2 真 LLM 闭环挂 Windows issue 后人工)
-- (contracts/ skipped — 内部架构,复用 P1 InterveneKind)
-- Constitution: `.specify/memory/constitution.md` (v1.1.0 — 原则 IV 新增 drift 受限 LLM 例外)
-Code: `apps/web-backend/app/orchestrator/coordinator_observer.py` (新模块 ~310 行;`DriftJudge`/
-      `NoDriftJudge`/注入点 + `ArtifactGate` + `CoordinatorObserver` watchdog:quiescence 检测 +
-      stagnation 激活就绪静默 worker + 收尾 gatekeeper gate_pass→done/gate_reject→partial + drift)
-      + `harness.py` 扩(`HarnessState.{inflight_steps,bootstrapped,observer,start/stop_observer}` +
-      `AgentWorker.{handle_v2_event SPEAK→真跑 _run_unlocked + step-success 去重, force_run_v2}` +
-      Coordinator 4 handler `is_v2` short-circuit + `_derive_goal` + `_bootstrap_first_step` +
-      run_harness v2 bootstrap/observer 启停)
-      + `pipeline.py` execute v2 收尾改 observer 接管(不调 `_emit_v2_finalization`,避免双 gate)
-Tests: `apps/web-backend/tests/orchestrator/*` (81 passed in 1.72s;P1 32 + P2 29 + US1 4 + US2 4 +
-       US3/US5 7 + US4 5)。v1 路径**字段级零回归**(US1 守护:observer=None/inflight=0/Coordinator 仍 chain)。
-关键转变:P2 的 v2 任务是"Coordinator chain 驱动真实 step + subscription chat overlay 并存";
-      P3 断开 v2 chain 驱动,改 subscription 链式驱动 `_run_step`(被点名+依赖就绪→真跑),
-      Coordinator 退为 observer watchdog。注意 work-driver 下 `_emit_v2_step_overlay` 的
-      artifact.update + agent.speak(mention) 会双路径触发下游,靠 step-success 去重保证只跑一次。
+Active spec-driven feature: **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** (planning)
+- Plan:       `specs/004-reviewer-dual-track/plan.md`
+- Spec:       `specs/004-reviewer-dual-track/spec.md`
+- Research:   `specs/004-reviewer-dual-track/research.md` (9 decisions + 4 派生发现)
+- Data model: `specs/004-reviewer-dual-track/data-model.md`
+- Quickstart: `specs/004-reviewer-dual-track/quickstart.md`
+- (contracts/ skipped — 内部架构,复用 P1 ReviewerVerdict schema)
+- Constitution: `.specify/memory/constitution.md` (v1.1.0;P4 **无需新宪章修订** — Reviewer 用 LLM 做质量验证是原则 IV 本职)
+设计要点:Reviewer 从"v1 即时质量门 + P3 链式终点 work-driver"重构为全程订阅双轨审校者 ——
+      **质量轨**(reviewer 订阅 artifact.update → handle_v2_event 特化 → 复用 `_quick_review` →
+      emit ReviewerVerdict(quality);版本去重)+ **流程逻辑轨**(observer quiescence → 新模块
+      `process_review.py` 3 纯规则:版本一致/依赖图/参与度 → ReviewerVerdict(process_logic))。
+      verdict.fail → observer bus.on 监听 → 转写 intervene 点名 + 重置 step `needs_fix`(解除 P3
+      去重)+ force_run_v2 修复(REVIEW_FIX_MAX_RETRY 上限);gatekeeper `_on_quiescence` 双因子
+      (完整性 + verdict)决策。验收基线=ScriptedBackend 测试级。
 
 Previously shipped (still authoritative for code):
+- **P3 Coordinator 转型 + subscription work-driver** ✅ Implemented — `specs/003-coordinator-transform/`
+  Code: `apps/web-backend/app/orchestrator/coordinator_observer.py` (~310 行;`DriftJudge`/`ArtifactGate`/
+        `CoordinatorObserver` watchdog:quiescence + stagnation 激活 + gatekeeper gate_pass/reject + drift)
+        + `harness.py`(`HarnessState.{inflight_steps,bootstrapped,observer}` + `handle_v2_event` SPEAK→真跑
+        `_run_unlocked` + step-success 去重 + `force_run_v2` + Coordinator 4 handler `is_v2` short-circuit +
+        bootstrap) + `pipeline.py` execute v2 收尾 observer 接管
+  Tests: `apps/web-backend/tests/orchestrator/*` (81 passed;P1 32 + P2 29 + US1 4 + US2 4 + US3/US5 7 + US4 5)
+  宪章 1.1.0:原则 IV 新增 drift 受限 LLM 例外。work-driver 下 artifact.update + agent.speak(mention) 双触发,
+  靠 step-success 去重只跑一次。
 - **P2 worker 订阅化 + decide-to-speak 闸门** ✅ Implemented — `specs/002-worker-subscription/`
   Code: `apps/web-backend/app/orchestrator/subscription.py` (~310 行;9 agent `WORKER_PROFILE` +
         Predicate helpers + `DecisionResult` + `decide_to_speak` + `SubscriptionRegistry`)
