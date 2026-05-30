@@ -175,25 +175,28 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P2 — Worker 订阅化 + decide-to-speak 闸门** ✅ Implemented
-- Plan:       `specs/002-worker-subscription/plan.md`
-- Spec:       `specs/002-worker-subscription/spec.md`
-- Research:   `specs/002-worker-subscription/research.md` (8 decisions, incl. chat-overlay scoping)
-- Data model: `specs/002-worker-subscription/data-model.md`
-- Quickstart: `specs/002-worker-subscription/quickstart.md`
-- Tasks:      `specs/002-worker-subscription/tasks.md` (39/41 done;T038 v1 baseline diff + T040 demo curl 需人工跑真 LLM 管线)
-- (contracts/ skipped — P2 is internal architecture, no new external APIs)
+Active spec-driven feature: **P3 — Coordinator 转型(observer + gatekeeper)+ subscription work-driver** (planning)
+- Plan:       `specs/003-coordinator-transform/plan.md`
+- Spec:       `specs/003-coordinator-transform/spec.md`
+- Research:   `specs/003-coordinator-transform/research.md` (9 decisions + 4 派生发现;v2 断 chain 驱动 → subscription work-driver)
+- Data model: `specs/003-coordinator-transform/data-model.md`
+- Quickstart: `specs/003-coordinator-transform/quickstart.md`
+- (contracts/ skipped — P3 is internal architecture, no new external APIs;复用 P1 InterveneKind)
 - Constitution: `.specify/memory/constitution.md`
-Code: `apps/web-backend/app/orchestrator/subscription.py` (新模块 ~310 行;9 agent `WORKER_PROFILE`
-      + Predicate helpers + `DecisionResult` + `decide_to_speak` 纯函数 + `SubscriptionRegistry`)
-      + `harness.py` 扩(`HarnessState.{subscriptions,agent_locks,get_agent_lock}` +
-      `AgentWorker.{inbox,_consume_loop,enqueue_v2,handle_v2_event}` + run() per-agent lock 包裹 +
-      `emit_v2` 末尾 dispatch + `run_harness` v2 分支构造 + 末尾 consume_task 清理)
-      + `pipeline.py` `_emit_v2_step_overlay` per-step chat overlay hook(write_versioned + AgentSpeak)
-Tests: `apps/web-backend/tests/orchestrator/*` (61 passed in 1.51s;P1 baseline 32 + US1 4 +
-       US2 19 + US3 6;v1 路径**字段级零回归**红线由 US1 T012-T015 守护)
+- **⚠️ Phase 0 前置**:drift(US4)需先走 `/speckit-constitution` 放宽"Coordinator 纯规则引擎"(1.0.0→1.1.0);US1/US2/US3/US5 不阻塞
+设计要点:v2 路径把驱动真实 step 从 Coordinator chain 转移到 subscription —— `handle_v2_event` SPEAK
+      从 emit 气泡升级为真跑 `_run_unlocked`;起点 bootstrap 触发 material;Coordinator 4 个 handler
+      `is_v2` short-circuit,退为 `coordinator_observer.py` 的 watchdog(stagnation 规则 + drift 可注入
+      LLM + 收尾 gatekeeper)。验收基线=ScriptedBackend 测试级闭环。
 
 Previously shipped (still authoritative for code):
+- **P2 worker 订阅化 + decide-to-speak 闸门** ✅ Implemented — `specs/002-worker-subscription/`
+  Code: `apps/web-backend/app/orchestrator/subscription.py` (~310 行;9 agent `WORKER_PROFILE` +
+        Predicate helpers + `DecisionResult` + `decide_to_speak` + `SubscriptionRegistry`)
+        + `harness.py`(`HarnessState.{subscriptions,agent_locks}` + `AgentWorker.{inbox,_consume_loop,
+        enqueue_v2,handle_v2_event}` + per-agent lock + `emit_v2` 末尾 dispatch + run_harness v2 分支)
+        + `pipeline.py` `_emit_v2_step_overlay` per-step chat overlay
+  Tests: `apps/web-backend/tests/orchestrator/*` (61 passed;P1 32 + US1 4 + US2 19 + US3 6)
 - **P1 v2 protocol + state model** ✅ Implemented — `specs/001-v2-chat-protocol-state/`
   Code: `apps/web-backend/app/orchestrator/{events_v2,artifacts_v2,ids,replay_check}.py`
         + `TaskRun.harness_version` / `HarnessState.is_v2` / `HarnessState.emit_v2()`
