@@ -12,6 +12,6 @@
     "admin": "pnpm --filter admin-frontend dev"
   },
   "dependencies": {
-    "openclaw": "2026.5.5"
+    "openclaw": "2026.5.27"
   }
 }
