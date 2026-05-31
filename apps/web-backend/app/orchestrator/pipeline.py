@@ -59,6 +59,39 @@ DEFAULT_NEXT_STEP: dict[str, str] = {
     "review":              "DONE",
 }
 
+# step → 它在 pipeline handler 里**实际通过 prev[...] 读取的上游 step state** 完整依赖。
+# 与 DEFAULT_NEXT_STEP(线性下一棒)不同:这是"真跑前哪些上游 step 必须已 success"。
+# 用途:v2 work-driver 的 step 级依赖门控(harness._deps_ready)。
+# 背景:subscription 闸门只看 4 个 CORE_ARTIFACT 版本(MaterialPool/ReportCore/Outline/
+# Script),无法表达"copywriting 读 upward_optimization step state"这类依赖
+# (upward-opt 不产出独立 artifact)→ 曾导致 copywriter 在 upward_opt 完成前被提前触发,
+# prev["upward_optimization"] KeyError。STEP_DEPENDS 让门控按真实 step 依赖判定。
+STEP_DEPENDS: dict[str, tuple[str, ...]] = {
+    "material_parsing":    (),
+    "point_extraction":    ("material_parsing",),
+    "structure_building":  ("point_extraction",),
+    "upward_optimization": ("point_extraction",),
+    "copywriting":         ("upward_optimization", "structure_building"),
+    "html_design":         ("copywriting",),
+    "video_production":     ("copywriting",),
+    "review":              ("copywriting",),
+}
+
+
+def _prev_json(prev: dict, *keys: str) -> dict:
+    """按顺序取第一个存在且有 output_json 的上游 step state 的 output_json;全缺返回 {}。
+
+    v2 work-driver 下 step 可能乱序触发,上游 step state 未必已写入 prev —— 防御访问避免
+    KeyError(与 harness 的 step 依赖门控构成双保险:门控保质量、本函数保不崩)。
+    多 key 表示"优先用前者,缺失回退后者"(如 upward_optimization 缺则回退 point_extraction)。
+    """
+    for k in keys:
+        s = prev.get(k)
+        if s is not None and getattr(s, "output_json", None):
+            return s.output_json
+    return {}
+
+
 # step → agent-id 列表(handoff.to 接受 agent-id;DONE / coordinator 表示终止)
 HANDOFF_VALID_TARGETS: list[str] = list(AGENT_TO_STEP.keys()) + ["coordinator", "DONE"]
 
@@ -1216,8 +1249,8 @@ def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
 输出同 ReportCore schema 的 JSON,内容改写但 schema 不变。"""
 
     elif step == "copywriting":
-        core = prev["upward_optimization"].output_json or prev["point_extraction"].output_json or {}
-        outline = prev["structure_building"].output_json or {}
+        core = _prev_json(prev, "upward_optimization", "point_extraction")
+        outline = _prev_json(prev, "structure_building")
         profile = DURATION_PROFILE.get(run.duration) or DURATION_PROFILE["3分钟"]
         word_count = profile["script_words"]
         per_narration = profile["narration_len"]
@@ -1489,8 +1522,8 @@ ruler 进度尺 + tick 印章替代圆点 + 数字 count-up + 章节段落感。
 只需如实在输出 JSON 中标记 `degraded: true` + `degrade_reason`,backend 会自动走录屏兜底。"""
 
     elif step == "review":
-        core = prev["upward_optimization"].output_json or prev["point_extraction"].output_json or {}
-        script = (prev["copywriting"].output_json or {}).get("script_md") or ""
+        core = _prev_json(prev, "upward_optimization", "point_extraction")
+        script = _prev_json(prev, "copywriting").get("script_md") or ""
         html_out = (prev.get("html_design") or StepState("","","")).output_json or {}
         presenter_audit = html_out.get("audit") or {}
         broadcast_audit = html_out.get("broadcast_audit") or {}
@@ -2270,7 +2303,7 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         await _broadcast(run, "chat.message", phase1_msg)
         extra_env = await env_for_agent(s.agent)
         try:
-            core = prev["upward_optimization"].output_json or prev["point_extraction"].output_json or {}
+            core = _prev_json(prev, "upward_optimization", "point_extraction")
             outline = prev["structure_building"].output_json or {}
             p1_res: TurnResult = await run_agent_turn(
                 agent_id=s.agent, message=_copywriting_phase1_prompt(run, core, outline),

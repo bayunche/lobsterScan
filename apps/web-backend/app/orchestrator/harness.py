@@ -389,6 +389,19 @@ class AgentWorker:
             return
 
         try:
+            # ── step 级依赖门控(fix: v2 copywriter 在 upward_optimization 完成前被触发)──
+            # SPEAK 但前置 step 尚未 success → 不消耗 mention 预算(不 bump),emit silent,
+            # 等上游真正完成后发出的再次 @ 再真跑。避免半成品出稿 + prev[...] KeyError。
+            if decision == DecisionResult.SPEAK and not self._deps_ready():
+                try:
+                    await st.emit_v2(AgentSilent(
+                        task_id=task_id, **{"from": self.agent_id},
+                        reply_to=msg_id, reason="等上游 step 完成",
+                    ))
+                except Exception as e:  # noqa: BLE001 — FR-016 极端兜底
+                    log.warning("dep-gate silent emit crash: %s", e)
+                return  # finally 释放锁;不 bump,保留预算给上游完成后的再次触发
+
             # SPEAK / SILENT 共同后续:bump 计数 + 标记 reply_to + emit v2 事件
             st.subscriptions.mention_counter.bump(self.agent_id)
             st.subscriptions.reply_to_registry.mark(self.agent_id, msg_id)
@@ -457,6 +470,31 @@ class AgentWorker:
             task_id=getattr(st.run, "task_id", "") or "",
         )
         await st.emit_v2(verdict)
+
+    def _deps_ready(self) -> bool:
+        """v2 work-driver SPEAK 真跑前的 step 级依赖门控(fix: copywriter 提前启动 KeyError)。
+
+        decide_to_speak 闸门只看 4 个 CORE_ARTIFACT 版本,无法表达"读上游 step state"的
+        依赖(如 copywriting 读 upward_optimization step,而后者不产出独立 artifact)。
+        这里按 pipeline.STEP_DEPENDS 检查每个前置 step 在 prev 里已 success。任一缺失 →
+        False(调用方 silent 不真跑,等上游真正完成后的再次 @ 触发)。
+        无依赖(空元组 / 未登记)→ 恒 True。导入失败等异常 → True(降级:不阻断,
+        靠 pipeline._prev_json 防御访问兜底,绝不因门控本身挂任务,FR-016)。
+        """
+        try:
+            from .pipeline import STEP_DEPENDS
+        except Exception:  # noqa: BLE001
+            return True
+        st = self.state
+        for dep in STEP_DEPENDS.get(self.step_key, ()):
+            d = st.by_key.get(dep)
+            # 依赖 step **不在 by_key** → 无法判定,不阻拦(放行,靠 _prev_json 防御兜底)。
+            # 只有依赖 step 已登记**且尚未 success** 才挡 —— 这正是 copywriter 在
+            # upward_optimization 完成前被提前触发的场景(它在真实 by_key 里、status≠success)。
+            # 测试用 _StubStep 往往只 stub 自身 step,上游 step 缺席 → 此处放行不误伤。
+            if d is not None and getattr(d, "status", None) != "success":
+                return False
+        return True
 
     async def force_run_v2(self) -> None:
         """observer stagnation 激活专用入口(P3, T031):绕过 decide_to_speak 直接跑 step。
