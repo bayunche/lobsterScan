@@ -1402,7 +1402,7 @@ narration 是讲稿的"原子段",一个 narration ≈ 一页 slide 念出的口
 这是信息溯源,后续 review 会用它对账。"""
 
     elif step == "html_design":
-        slides = (prev["copywriting"].output_json or {}).get("slides") or []
+        slides = _prev_json(prev, "copywriting").get("slides") or []
         body = f"""你是【设计师】。**这是整个 pipeline 里视觉质量的最后一道关 — 设计水平决定汇报材料能不能被领导认真看**。
 
 # 两份产物 · 都必须高质量
@@ -2227,7 +2227,7 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         #   1) 占位 provider(sadtalker 等 implemented=False)→ 纯 stub
         #   2) none 模式 → 后端直接生成 SRT 字幕,不去喊 agent
         if (not provider.implemented) or provider.id == "none":
-            narrations = (prev["copywriting"].output_json or {}).get("narrations") or []
+            narrations = _prev_json(prev, "copywriting").get("narrations") or []
             payload = stub_response_payload(
                 provider, narrations_count=len(narrations), style=run.style,
             )
@@ -2304,7 +2304,7 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         extra_env = await env_for_agent(s.agent)
         try:
             core = _prev_json(prev, "upward_optimization", "point_extraction")
-            outline = prev["structure_building"].output_json or {}
+            outline = _prev_json(prev, "structure_building")
             p1_res: TurnResult = await run_agent_turn(
                 agent_id=s.agent, message=_copywriting_phase1_prompt(run, core, outline),
                 timeout_sec=1500, extra_env=extra_env,
