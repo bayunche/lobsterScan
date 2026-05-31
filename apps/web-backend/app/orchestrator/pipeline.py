@@ -1117,7 +1117,8 @@ def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
 完整保留 Phase 1 的 doc_structure 字段在最终 JSON 的 `payload.doc_structure` 里(便于下游 trace),内容可以原样复制。"""
 
     elif step == "point_extraction":
-        pool = (prev["material_parsing"].output_json or {}).get("payload") or prev["material_parsing"].output_json or {}
+        _mp = _prev_json(prev, "material_parsing")
+        pool = _mp.get("payload") or _mp or {}
         # point_extraction 也走双阶段:Phase1 候选清单(5-10 条带分) → Phase2 收敛 top3 + why_matters
         # Phase1 结果存在 prev["__candidates__"] 喂 Phase2 prompt 用
         candidates = (prev.get("__candidates__") or StepState("","","")).output_json or {}
@@ -1173,7 +1174,7 @@ def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
 ```"""
 
     elif step == "structure_building":
-        core = prev["point_extraction"].output_json or {}
+        core = _prev_json(prev, "point_extraction")
         core_block = json.dumps(core, ensure_ascii=False, indent=2)[:1200]
         duration_block = _duration_block(run.duration)
         body = f"""你是【结构设计师】。把 ReportCore 套进合适的大纲模板。
@@ -1219,7 +1220,7 @@ def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
 - 每个 data_keys 在 ReportCore 都能找到?"""
 
     elif step == "upward_optimization":
-        core = prev["point_extraction"].output_json or {}
+        core = _prev_json(prev, "point_extraction")
         body = f"""你是【表达教练】。把这份 ReportCore 改写成更适合向上汇报的版本:结论前置 / 风险显化 / 诉求具体化。
 你不是 humanizer — humanizer 去 AI 套话,你转视角。
 
@@ -1492,7 +1493,7 @@ ruler 进度尺 + tick 印章替代圆点 + 数字 count-up + 章节段落感。
 - web-design-engineer + web-video-presentation 这两个 SKILL.md 你真读了哪些章节?(在 thinking 里引用原文)"""
 
     elif step == "video_production":
-        copy_out = prev["copywriting"].output_json or {}
+        copy_out = _prev_json(prev, "copywriting")
         script = copy_out.get("script_md") or ""
         slides = copy_out.get("slides") or []
         narrations = copy_out.get("narrations") or []
@@ -2273,7 +2274,8 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         await _broadcast(run, "chat.message", phase1_msg)
         extra_env = await env_for_agent(s.agent)
         try:
-            pool = (prev["material_parsing"].output_json or {}).get("payload") or prev["material_parsing"].output_json or {}
+            _mp2 = _prev_json(prev, "material_parsing")
+            pool = _mp2.get("payload") or _mp2 or {}
             p1_res: TurnResult = await run_agent_turn(
                 agent_id=s.agent, message=_point_phase1_prompt(run, pool),
                 timeout_sec=1500, extra_env=extra_env,
