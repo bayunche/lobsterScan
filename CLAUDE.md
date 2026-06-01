@@ -175,15 +175,28 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** 🚧 Planning
+Active spec-driven feature: **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** ✅ Implemented
 - Plan:       `specs/005-transcript-aware-prompt/plan.md`
 - Spec:       `specs/005-transcript-aware-prompt/spec.md`
 - Research:   `specs/005-transcript-aware-prompt/research.md` (5 决策 + 派生发现)
 - Data model: `specs/005-transcript-aware-prompt/data-model.md` (transcript_tail / envelope / V2_PROMPT_MODE)
 - Quickstart: `specs/005-transcript-aware-prompt/quickstart.md`
+- Tasks:      `specs/005-transcript-aware-prompt/tasks.md` (24/24;US1 transcript + US2 信封 + US3 双轨 + 测试 + 真 LLM 全绿)
 - Design:     `docs/superpowers/specs/2026-05-31-p5-transcript-aware-prompt-design.md`
 - Constitution: `.specify/memory/constitution.md` (v1.1.0;P5 **无需新宪章修订** — prompt 工程,不引入新 LLM 决策权)
 - (contracts/ skipped — 复用 P1 v2 事件 schema;信封是 prompt↔解析内部约定)
+Code: `apps/web-backend/app/orchestrator/pipeline.py`(`_envelope_enabled` + `_transcript_block`
+      复用 observer `_recent`/`_artifact_log` 渲染群聊上下文 + `_ENVELOPE_RULE` 信封契约 +
+      `_unwrap_envelope` 双格式解析回填 artifact + `_step_prompt` 注入 transcript/选 rule +
+      `_run_step` 解信封暂存 `s._envelope` + `_emit_v2_step_overlay` 按 action 走 speak/silent/done)
+      + `subscription.py`(`V2_PROMPT_MODE` 默认 legacy / `V2_TRANSCRIPT_K` 默认 8)
+      + `harness.py`(调 `_run_step` 前 `prev["__state__"]=st` 传 state)
+Tests: `apps/web-backend/tests/orchestrator/{test_transcript_block,test_envelope_parse,test_p5_e2e}.py`
+      + `test_v1_regression.py` 扩(123 passed;原 98 + P5 25)。
+真 LLM 验证:envelope task `tsk_d2857b366508` → partial / 8 step 全 done / 解析零失败 /
+      silent 语义工作;回退 task `tsk_a86aa28e30d3`(unset flag)→ partial / 7 step done /
+      无信封泄漏,FR-015 一键回退成立。
+关键:`V2_PROMPT_MODE` 与 `harness_version`(is_v2)正交;legacy(默认)下 P5 全短路 = P4 行为(零回归)。
 
 Previously shipped (still authoritative for code):
 - **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** ✅ Implemented

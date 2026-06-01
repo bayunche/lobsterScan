@@ -65,8 +65,8 @@
 
 - [X] T017 [P] [US3] 扩 `apps/web-backend/tests/orchestrator/test_v1_regression.py`:显式断言 `V2_PROMPT_MODE` 未设/legacy 时,`_step_prompt` 不含 transcript、用 JSON_RULE、`_unwrap_envelope` 对旧格式恒等(s.output_json 与 extract_json 直出一致)(FR-014,SC-001)
 - [X] T018 [US3] 跑全量 `pytest apps/web-backend/tests -q` 确认 legacy 零回归(原基线 + 新增全绿),记录数字到 tasks.md 收尾
-- [ ] T019 [US3] 真 LLM 端到端(quickstart §3):`V2_PROMPT_MODE=envelope` 起后端 + 提交 1 个 v2 task,用真实 task_id 轮询,断言 task.json status∈{done,partial}、8 step 全 success、events 无解析失败/KeyError(SC-003);失败若因 deepseek 网络抖动则重试(spec 假设),非契约问题
-- [ ] T020 [US3] 回退验证(quickstart §4):去 flag 重起,重跑 task 仍等价 P4 跑通(FR-015)
+- [X] T019 [US3] 真 LLM 端到端(quickstart §3):`V2_PROMPT_MODE=envelope` 起后端 + 提交 1 个 v2 task,用真实 task_id 轮询,断言 task.json status∈{done,partial}、8 step 全 success、events 无解析失败/KeyError(SC-003);失败若因 deepseek 网络抖动则重试(spec 假设),非契约问题
+- [X] T020 [US3] 回退验证(quickstart §4):去 flag 重起,重跑 task 仍等价 P4 跑通(FR-015)
 
 **Checkpoint**: US3 完成 = P5 全量验收达标。
 
@@ -74,10 +74,10 @@
 
 ## Phase 6: Polish & 收尾
 
-- [ ] T021 [P] 更新 `docs/开发文档.md` §9.4.5 P5 行标注「已落地」+ 关键实现位置(_transcript_block/_unwrap_envelope/V2_PROMPT_MODE)
-- [ ] T022 [P] 更新 CLAUDE.md SPECKIT 块:P5 状态 Planning→Implemented + Code/Tests 位置 + tasks 完成数
-- [ ] T023 在 `.env.example` 加 `V2_PROMPT_MODE` / `V2_TRANSCRIPT_K` 注释说明(研发开关,默认 legacy)
-- [ ] T024 终轮 `pytest apps/web-backend/tests -q` 全绿 + commit「P5 全栈落地」
+- [X] T021 [P] 更新 `docs/开发文档.md` §9.4.5 P5 行标注「已落地」+ 关键实现位置(_transcript_block/_unwrap_envelope/V2_PROMPT_MODE)
+- [X] T022 [P] 更新 CLAUDE.md SPECKIT 块:P5 状态 Planning→Implemented + Code/Tests 位置 + tasks 完成数
+- [X] T023 在 `.env.example` 加 `V2_PROMPT_MODE` / `V2_TRANSCRIPT_K` 注释说明(研发开关,默认 legacy)
+- [X] T024 终轮 `pytest apps/web-backend/tests -q` 全绿 + commit「P5 全栈落地」
 
 ---
 
