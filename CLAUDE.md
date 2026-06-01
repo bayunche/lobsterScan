@@ -175,7 +175,18 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** ✅ Implemented
+Active spec-driven feature: **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** 🚧 Planning
+- Plan:       `specs/005-transcript-aware-prompt/plan.md`
+- Spec:       `specs/005-transcript-aware-prompt/spec.md`
+- Research:   `specs/005-transcript-aware-prompt/research.md` (5 决策 + 派生发现)
+- Data model: `specs/005-transcript-aware-prompt/data-model.md` (transcript_tail / envelope / V2_PROMPT_MODE)
+- Quickstart: `specs/005-transcript-aware-prompt/quickstart.md`
+- Design:     `docs/superpowers/specs/2026-05-31-p5-transcript-aware-prompt-design.md`
+- Constitution: `.specify/memory/constitution.md` (v1.1.0;P5 **无需新宪章修订** — prompt 工程,不引入新 LLM 决策权)
+- (contracts/ skipped — 复用 P1 v2 事件 schema;信封是 prompt↔解析内部约定)
+
+Previously shipped (still authoritative for code):
+- **P4 — Reviewer 双轨(质量 + 流程逻辑)+ verdict.fail 修复闭环** ✅ Implemented
 - Plan:       `specs/004-reviewer-dual-track/plan.md`
 - Spec:       `specs/004-reviewer-dual-track/spec.md`
 - Research:   `specs/004-reviewer-dual-track/research.md` (9 decisions + 4 派生发现)
