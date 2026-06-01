@@ -1,3 +1,3 @@
 {
-  "feature_directory": "specs/005-transcript-aware-prompt"
+  "feature_directory": "specs/006-concurrency-fanout"
 }
