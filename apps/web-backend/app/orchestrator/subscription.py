@@ -41,6 +41,8 @@ __all__ = [
     "V2_MENTION_LIMIT",
     "V2_LOCK_WAIT_SEC",
     "V2_INBOX_MAX",
+    "V2_PROMPT_MODE",
+    "V2_TRANSCRIPT_K",
     "Predicate",
     "mention_includes",
     "hint_agent_is",
@@ -61,6 +63,13 @@ __all__ = [
 V2_MENTION_LIMIT: int = int(os.environ.get("V2_MENTION_LIMIT", "2"))
 V2_LOCK_WAIT_SEC: float = float(os.environ.get("V2_LOCK_WAIT_SEC", "60"))
 V2_INBOX_MAX: int = int(os.environ.get("V2_INBOX_MAX", "32"))
+
+# P5(spec 005-transcript-aware-prompt):prompt 契约模式 + transcript 注入条数。
+# V2_PROMPT_MODE 与 harness_version(is_v2)正交:is_v2 决定走 v2 harness,
+# V2_PROMPT_MODE 在 is_v2 下再分 legacy(=今天 P4 行为)/ envelope(transcript + 信封契约)。
+# 默认 legacy → P5 全部新代码短路,零回归(FR-014)。每次读以支持测试 monkeypatch。
+V2_PROMPT_MODE: str = os.environ.get("V2_PROMPT_MODE", "legacy")
+V2_TRANSCRIPT_K: int = int(os.environ.get("V2_TRANSCRIPT_K", "8"))
 
 
 # ────────────────────────────── 谓词 ──────────────────────────────

@@ -12,8 +12,8 @@
 
 ## Phase 1: Setup(配置 + 常量)
 
-- [ ] T001 在 `apps/web-backend/app/orchestrator/subscription.py` 的 env 常量区(V2_MENTION_LIMIT 旁)新增 `V2_PROMPT_MODE = os.environ.get("V2_PROMPT_MODE", "legacy")` 与 `V2_TRANSCRIPT_K = int(os.environ.get("V2_TRANSCRIPT_K", "8"))`,并加入 `__all__`(research 决策 3)
-- [ ] T002 在 `apps/web-backend/app/orchestrator/pipeline.py` 新增 `_envelope_enabled() -> bool`(每次读 `subscription.V2_PROMPT_MODE`,支持测试 monkeypatch,同 V2_LOCK_WAIT_SEC 模式),返回是否 == "envelope"
+- [X] T001 在 `apps/web-backend/app/orchestrator/subscription.py` 的 env 常量区(V2_MENTION_LIMIT 旁)新增 `V2_PROMPT_MODE = os.environ.get("V2_PROMPT_MODE", "legacy")` 与 `V2_TRANSCRIPT_K = int(os.environ.get("V2_TRANSCRIPT_K", "8"))`,并加入 `__all__`(research 决策 3)
+- [X] T002 在 `apps/web-backend/app/orchestrator/pipeline.py` 新增 `_envelope_enabled() -> bool`(每次读 `subscription.V2_PROMPT_MODE`,支持测试 monkeypatch,同 V2_LOCK_WAIT_SEC 模式),返回是否 == "envelope"
 
 ---
 
@@ -21,9 +21,9 @@
 
 **目标**:transcript 数据源接入 + 信封 rule 常量就位,US1/US2 都依赖。
 
-- [ ] T003 [P] 在 `pipeline.py` 新增 `_transcript_block(state, k=None) -> str`:从 `state.observer._recent`(最近发言)+ `state.observer._artifact_log`(artifact 时序)读取,渲染中文「群聊上下文」段落(发言人用 AGENT_DISPLAY 中文名);k 缺省读 V2_TRANSCRIPT_K;observer 为 None / 异常 / 两者皆空 → 返回空串(FR-004/005/016,research 决策 1/4)
-- [ ] T004 [P] 在 `pipeline.py` 新增 `_ENVELOPE_RULE` 常量(信封版输出契约文案,替代 JSON_RULE):指示 agent 输出 `{action(speak|silent|done), mentions, intent, reason, artifact}`,artifact 内放原 typed 产物;含 silent/done 何时用的说明(FR-006,data-model §2)
-- [ ] T005 在 `pipeline.py` 新增 `_unwrap_envelope(parsed) -> (action, mentions, intent, reason, artifact)`:有 action 键→信封(取 artifact,非 dict→{});无 action→旧格式(整体当 artifact、action=speak、mentions 取 handoff.to);action 非法→speak;parsed=None→(speak,[],propose,"",{})(FR-007/008/012,research 决策 2,data-model §2 解析校验)
+- [X] T003 [P] 在 `pipeline.py` 新增 `_transcript_block(state, k=None) -> str`:从 `state.observer._recent`(最近发言)+ `state.observer._artifact_log`(artifact 时序)读取,渲染中文「群聊上下文」段落(发言人用 AGENT_DISPLAY 中文名);k 缺省读 V2_TRANSCRIPT_K;observer 为 None / 异常 / 两者皆空 → 返回空串(FR-004/005/016,research 决策 1/4)
+- [X] T004 [P] 在 `pipeline.py` 新增 `_ENVELOPE_RULE` 常量(信封版输出契约文案,替代 JSON_RULE):指示 agent 输出 `{action(speak|silent|done), mentions, intent, reason, artifact}`,artifact 内放原 typed 产物;含 silent/done 何时用的说明(FR-006,data-model §2)
+- [X] T005 在 `pipeline.py` 新增 `_unwrap_envelope(parsed) -> (action, mentions, intent, reason, artifact)`:有 action 键→信封(取 artifact,非 dict→{});无 action→旧格式(整体当 artifact、action=speak、mentions 取 handoff.to);action 非法→speak;parsed=None→(speak,[],propose,"",{})(FR-007/008/012,research 决策 2,data-model §2 解析校验)
 
 ---
 

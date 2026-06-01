@@ -186,6 +186,126 @@ JSON_RULE = """
 """
 
 
+# ────────────────────────────── P5 · transcript-aware + 信封契约 ──────────────────────────────
+# spec 005-transcript-aware-prompt。全部由 V2_PROMPT_MODE(默认 legacy)flag 控制,
+# legacy 下完全短路 = P4 现状(零回归 FR-014)。
+
+# envelope 模式的输出契约文案(替代 JSON_RULE)。typed 产物放进 artifact 子对象,schema 不变。
+_ENVELOPE_RULE = """
+
+# 输出格式（强制 · 必须两段）
+你必须按这个顺序输出**两段内容**:
+
+## 第 1 段:思考过程(自然语言,80-300 字)
+像跟同事说话一样讲清你的思路、抓住的关键点、怎么决策的。**不要写 emoji,不要 markdown 表格**。
+
+## 第 2 段:群聊信封(JSON 代码块)
+紧接着输出**一段** ```json ... ``` 代码块,是一个「群聊信封」,必须能被 json.loads() 解析:
+
+```json
+{
+  "action": "speak",
+  "mentions": ["下游同事的英文 id,如 copywriter"],
+  "intent": "propose",
+  "reason": "",
+  "artifact": { /* 你这一步的产物,字段同你本来要输出的 JSON,原样放这里 */ }
+}
+```
+
+字段说明:
+- `action`:三选一 —— `speak`(我有产物要交,点名下游)/ `silent`(依赖没就绪或没我的活,保持沉默)/ `done`(我认为整体可以收尾了)。
+- `mentions`:`speak` 时点名下一棒同事的英文 id(数组);`silent` / `done` 时填 `[]`。
+- `intent`:`propose`(给产物) / `ask`(求助) / `review`(评审意见),缺省 propose。
+- `reason`:`silent` 时一句话说明为什么不开口;其他情况可留空。
+- `artifact`:**你原本要输出的那份 typed JSON 原样放这里**(字段一字不改)。`silent` / `done` 时可省略或留 {}。
+
+只允许这两段,顺序固定:先「思考过程」,再「群聊信封 JSON」。**不要把 artifact 字段平铺到信封外层。**
+"""
+
+
+def _envelope_enabled() -> bool:
+    """是否启用 P5 信封契约 + transcript 注入(V2_PROMPT_MODE == envelope)。
+
+    每次读 subscription.V2_PROMPT_MODE(支持测试 monkeypatch,同 V2_LOCK_WAIT_SEC 模式)。
+    """
+    try:
+        from . import subscription as _sub
+        return getattr(_sub, "V2_PROMPT_MODE", "legacy") == "envelope"
+    except Exception:  # noqa: BLE001 — FR-016 降级:读取异常按 legacy
+        return False
+
+
+def _transcript_block(state: Any, k: int | None = None) -> str:
+    """渲染「群聊上下文」段落:最近 K 条发言 + 当前可见 artifact 摘要(FR-001/002/003/004/005)。
+
+    数据源复用 observer 的 _recent(发言)+ _artifact_log(artifact 时序),不新建订阅源。
+    observer 为 None / 异常 / 两者皆空 → 返回空串(FR-004/016 降级,research 决策 1/4)。
+    """
+    try:
+        if k is None:
+            from . import subscription as _sub
+            k = getattr(_sub, "V2_TRANSCRIPT_K", 8)
+        obs = getattr(state, "observer", None)
+        if obs is None:
+            return ""
+        recent = list(getattr(obs, "_recent", []) or [])[-k:]
+        artifacts = list(getattr(obs, "_artifact_log", []) or [])
+        if not recent and not artifacts:
+            return ""
+        lines: list[str] = ["\n\n# 群聊上下文(最近发言)"]
+        for text in recent:
+            lines.append(f"- {str(text)[:160]}")
+        if artifacts:
+            lines.append("# 当前可见产物")
+            seen: set[str] = set()
+            for a in artifacts:
+                aid = a.get("id") or ""
+                ver = a.get("version")
+                prod = a.get("producer") or ""
+                disp = AGENT_DISPLAY.get(prod, "同事")
+                key = f"{aid}"
+                if key in seen:
+                    # 同 artifact 多版本只留最新一条提示
+                    lines = [ln for ln in lines if not ln.startswith(f"- {aid} v")]
+                seen.add(key)
+                lines.append(f"- {aid} v{ver}({disp})")
+        return "\n".join(lines) + "\n"
+    except Exception as e:  # noqa: BLE001 — FR-016 降级
+        log.warning("transcript block render failed: %s", e)
+        return ""
+
+
+def _unwrap_envelope(parsed: dict | None) -> tuple[str, list[str], str, str, dict]:
+    """解析 agent 输出:信封格式取 artifact,旧格式整体当 artifact(FR-007/008/012)。
+
+    返回 (action, mentions, intent, reason, artifact)。
+    - 有 `action` 键 → 信封:取 artifact(非 dict → {});action 非法值 → speak。
+    - 无 `action` 键 → 旧格式:整体当 artifact、action=speak、mentions 取 handoff.to。
+    - parsed 为 None → (speak, [], propose, "", {})。
+    research 决策 2 / data-model §2 解析校验。
+    """
+    if not isinstance(parsed, dict):
+        return "speak", [], "propose", "", {}
+    if "action" in parsed:
+        action = parsed.get("action")
+        if action not in ("speak", "silent", "done"):
+            action = "speak"
+        artifact = parsed.get("artifact")
+        if not isinstance(artifact, dict):
+            artifact = {}
+        mentions = parsed.get("mentions") or []
+        if not isinstance(mentions, list):
+            mentions = []
+        intent = parsed.get("intent") or "propose"
+        reason = parsed.get("reason") or ""
+        return action, [str(m) for m in mentions], str(intent), str(reason), artifact
+    # 旧格式:无 action → 整体当 artifact,下游取 handoff.to(向后兼容)
+    handoff = parsed.get("handoff") if isinstance(parsed.get("handoff"), dict) else {}
+    to = (handoff.get("to") or "").strip() if handoff else ""
+    mentions = [to] if to and to not in ("DONE", "coordinator") else []
+    return "speak", mentions, "propose", "", parsed
+
+
 @dataclass
 class StepState:
     step: str
