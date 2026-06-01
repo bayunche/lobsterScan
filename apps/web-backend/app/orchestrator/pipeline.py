@@ -1162,8 +1162,14 @@ def _copywriting_phase1_prompt(run: TaskRun, core: dict, outline: dict) -> str:
 
 
 def _step_prompt(step: str, run: TaskRun, prev: dict[str, StepState]) -> str:
-    # ctx = 全局 ctx(supplement) + coordinator brief + 本 step 必读 skill + 自主拆解授权
+    # ctx = 全局 ctx(supplement) + [P5 transcript] + coordinator brief + 本 step 必读 skill + 自主拆解授权
+    # P5(spec 005):envelope 模式在 global ctx 后注入群聊上下文(transcript_tail);
+    # legacy 模式 _transcript_block 不调用,prompt 与 P4 字段级一致(FR-013/014)。
+    transcript = ""
+    if _envelope_enabled():
+        transcript = _transcript_block(prev.get("__state__"))
     ctx = (_build_global_ctx(run)
+           + transcript
            + _agent_brief_block(run, step)
            + _required_skills_block(step)
            + _autonomy_block()
@@ -1797,16 +1803,17 @@ ruler 进度尺 + tick 印章替代圆点 + 数字 count-up + 章节段落感。
     else:
         body = "请输出 JSON 代码块。"
 
+    # P5(spec 005):envelope 模式用信封契约,legacy 用 JSON_RULE(FR-006/013/014)。
+    output_rule = _ENVELOPE_RULE if _envelope_enabled() else JSON_RULE
     if step == "video_production":
         return body + """
 
-# 输出格式（强制）
-**你必须先用 Bash 工具真正执行 skill 脚本**,拿到真实的执行结果后,再输出最终 JSON。
+# 输出格式（强制 · 先执行再汇总）
+**你必须先用 Bash 工具真正执行 skill 脚本**,拿到真实的执行结果后,再输出最终结果。
 不要跳过 Bash 执行直接编写 JSON — backend 会验证文件是否存在,伪造的路径会被标记 verified=false。
-
-执行完成后,把所有结果汇总到一段 ```json ... ``` 代码块中输出。
-"""
-    return body + JSON_RULE
+执行完成后,把所有结果汇总输出。
+""" + output_rule
+    return body + output_rule
 
 
 def _persist_step(run: TaskRun, s: StepState) -> None:
@@ -1948,35 +1955,54 @@ async def _emit_v2_step_overlay(
         except Exception as e:  # noqa: BLE001 — FR-020 降级
             log.warning("v2 per-step write_versioned %s failed: %s", artifact_id, e)
 
-    # ② emit AgentSpeak — 让 mention 链路驱动订阅
+    # ② emit AgentSpeak / AgentSilent — 让 mention 链路驱动订阅
+    # P5(spec 005):envelope 模式下从 step._envelope 读 action/mentions/intent(FR-009/010/011);
+    # legacy 模式保持从 handoff 合成 mentions(下方 else 分支),行为与 P4 一致(research 决策 5)。
+    envelope = getattr(step, "_envelope", None) if _envelope_enabled() else None
     try:
-        # mentions = handoff.to(若它是已知的 agent;否则按默认链 fallback)
-        to_raw = (handoff.get("to") or "").strip()
-        mentions: list[str] = []
-        if to_raw and to_raw not in ("DONE", "coordinator"):
-            mentions = [to_raw]
-        elif step.step in DEFAULT_NEXT_STEP:
-            next_step = DEFAULT_NEXT_STEP[step.step]
-            if next_step != "DONE":
-                next_agent = STEP_TO_AGENT.get(next_step, "")
-                if next_agent:
-                    mentions = [next_agent]
+        from .events_v2 import AgentSilent
+
+        # silent:不产 artifact、不点名,emit AgentSilent(reason)(FR-010)
+        if envelope and envelope.get("action") == "silent":
+            await state.emit_v2(AgentSilent(
+                task_id=run.task_id, **{"from": producer_agent_id},
+                reply_to=None, reason=(envelope.get("reason") or "无补充")[:200],
+            ))
+            return
+
+        if envelope is not None:
+            # speak / done:mentions 来自信封(done 时 LLM 应给空 → 自然走 quiescence→gatekeeper,FR-011)
+            mentions = [m for m in (envelope.get("mentions") or [])
+                        if m and m not in ("DONE", "coordinator")]
+            intent = envelope.get("intent") or "propose"
+        else:
+            # legacy:mentions = handoff.to(若是已知 agent;否则按默认链 fallback)
+            to_raw = (handoff.get("to") or "").strip()
+            mentions = []
+            if to_raw and to_raw not in ("DONE", "coordinator"):
+                mentions = [to_raw]
+            elif step.step in DEFAULT_NEXT_STEP:
+                next_step = DEFAULT_NEXT_STEP[step.step]
+                if next_step != "DONE":
+                    next_agent = STEP_TO_AGENT.get(next_step, "")
+                    if next_agent:
+                        mentions = [next_agent]
+            intent = "propose"
 
         # text: 复用 _summarize_output;若空降级为 step 显示名
         text = _summarize_output(
             step.step, step.output_json, step.output_text or "",
         ) or f"{STEP_TO_AGENT.get(step.step, producer_agent_id)} 完成"
-        # 任何 step 都是 propose 语气(进行中接力),与收尾期的 confirm 区分
         await state.emit_v2(AgentSpeak(
             task_id=run.task_id, **{"from": producer_agent_id},
             text=text[:4000],
             mentions=mentions, cc=[], reply_to=None,
-            intent="propose",
+            intent=intent,
             artifact_updates=[],
         ))
     except Exception as e:  # noqa: BLE001 — FR-020 降级
         log.warning(
-            "v2 per-step AgentSpeak failed for %s/%s: %s",
+            "v2 per-step overlay emit failed for %s/%s: %s",
             producer_agent_id, step.step, e,
         )
 
@@ -2497,6 +2523,17 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
         )
         s.output_text = res.text
         s.output_json = extract_json(res.text)
+        # P5(spec 005):envelope 模式解信封 → 取 artifact 回填 output_json,
+        # 信封头(action/mentions/intent/reason)暂存 s._envelope 供 overlay 用(FR-008/012)。
+        # legacy 模式或旧格式:_unwrap_envelope 对无 action 的 dict 是恒等(整体当 artifact),
+        # 故下方 needs_retry 等读 s.output_json 的逻辑无需改(research 决策 2 派生发现 / T012)。
+        if _envelope_enabled():
+            action, mentions, intent, reason, artifact = _unwrap_envelope(s.output_json)
+            s.output_json = artifact
+            s._envelope = {
+                "action": action, "mentions": mentions,
+                "intent": intent, "reason": reason,
+            }
         s.provider = res.provider
         s.model = res.model
         s.prompt_tokens += res.prompt_tokens

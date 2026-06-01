@@ -32,10 +32,10 @@
 **Goal**: transcript 模式下,每个 agent 的 prompt 含「群聊上下文」段落(最近 K 条发言 + artifact 摘要)。
 **Independent Test**: 触发 agent 构造 prompt,断言含群聊上下文段;legacy 不含;超 K 截断;空起点不报错。
 
-- [ ] T006 [US1] 改 `pipeline.py` 的 `_step_prompt`(line ~1689 区):`_envelope_enabled()` 为真时,在 `_build_global_ctx` 之后注入 `_transcript_block(state)`(需把 state 传入 _step_prompt / 各 _build_*_prompt 的调用链;若 state 不在作用域,从 _run_step 传入)(FR-001/002/013)
-- [ ] T007 [US1] 确认 legacy 模式 `_step_prompt` 不注入 transcript(短路),与 P4 现状字段级一致(FR-014)
-- [ ] T008 [P] [US1] 新增 `apps/web-backend/tests/orchestrator/test_transcript_block.py`:测 `_transcript_block` 渲染(有发言+artifact→含中文段)、超 K 截断(FR-003)、空起点→空串(FR-004)、observer None→空串(FR-016)、AGENT_DISPLAY 中文名映射
-- [ ] T009 [P] [US1] 在 test_transcript_block.py 加 `_step_prompt` 集成断言:envelope 模式 prompt 含群聊上下文段(US1-AC1);legacy 模式不含(US1-AC2)
+- [X] T006 [US1] 改 `pipeline.py` 的 `_step_prompt`(line ~1689 区):`_envelope_enabled()` 为真时,在 `_build_global_ctx` 之后注入 `_transcript_block(state)`(需把 state 传入 _step_prompt / 各 _build_*_prompt 的调用链;若 state 不在作用域,从 _run_step 传入)(FR-001/002/013)
+- [X] T007 [US1] 确认 legacy 模式 `_step_prompt` 不注入 transcript(短路),与 P4 现状字段级一致(FR-014)
+- [X] T008 [P] [US1] 新增 `apps/web-backend/tests/orchestrator/test_transcript_block.py`:测 `_transcript_block` 渲染(有发言+artifact→含中文段)、超 K 截断(FR-003)、空起点→空串(FR-004)、observer None→空串(FR-016)、AGENT_DISPLAY 中文名映射
+- [X] T009 [P] [US1] 在 test_transcript_block.py 加 `_step_prompt` 集成断言:envelope 模式 prompt 含群聊上下文段(US1-AC1);legacy 模式不含(US1-AC2)
 
 **Checkpoint**: US1 可独立验收 —— transcript 感知交付,输出契约仍可保持 legacy。
 
@@ -46,13 +46,13 @@
 **Goal**: envelope 模式 agent 输出信封;解析取出 artifact 回填;action 驱动 overlay。
 **Independent Test**: 跑 agent 出信封,断言 artifact 正确 unwrap、speak 点名下游、silent/done 按语义、旧格式容错。
 
-- [ ] T010 [US2] 改 `pipeline.py` 的 `_step_prompt`:envelope 模式用 `_ENVELOPE_RULE` 替代 `JSON_RULE`(line 1689 `return body + JSON_RULE`);legacy 仍用 JSON_RULE(FR-006/013/014)
-- [ ] T011 [US2] 改 `pipeline.py` 的 `_run_step`(line ~2379 `s.output_json = extract_json(res.text)`):envelope 模式下 `extract_json` 后调 `_unwrap_envelope`,把 artifact 回填 `s.output_json`,把 (action, mentions, intent, reason) 暂存到 step(如 `s._envelope = {...}`)供 overlay 用(FR-008/012/016)
-- [ ] T012 [US2] 确认 T011 后既有 needs_retry/needs_help 信号读取(line ~2396 读 s.output_json)无需改 —— unwrap 已把 artifact 回填 s.output_json(research 决策 2 派生发现);加注释说明
-- [ ] T013 [US2] 改 `pipeline.py` 的 `_emit_v2_step_overlay`(line ~1782):envelope 模式从 step 暂存的信封读 mentions/intent/action;`action=speak`→现有 AgentSpeak(mentions,intent)+ArtifactUpdate;`action=silent`→emit AgentSilent(reason)、不产 artifact、不点名;`action=done`→mentions 空(走 quiescence→gatekeeper);legacy 模式保持从 handoff 合成(FR-009/010/011,research 决策 5)
-- [ ] T014 [P] [US2] 新增 `apps/web-backend/tests/orchestrator/test_envelope_parse.py`:测 `_unwrap_envelope` 信封格式(取 artifact)、旧格式(整体当 artifact+action 推断 speak+handoff.to)、缺 action、artifact 非 dict、action 非法、parsed=None 六种(FR-007/008/012,US2-AC4)
-- [ ] T015 [P] [US2] 新增 `apps/web-backend/tests/orchestrator/test_p5_e2e.py`:ScriptedBackend envelope 模式跑链式闭环(同 test_v2_workdriver 风格),断言 artifact 正确 unwrap、speak mentions 驱动下游、silent 不产 artifact、done→gatekeeper 收尾(US2-AC1/2/3,SC-002)
-- [ ] T016 [US2] 在 test_p5_e2e.py 加 SC-005 断言:envelope 包裹再解出的业务产物(如 copywriting 的 script_md/slides)与 legacy 模式逐字段一致
+- [X] T010 [US2] 改 `pipeline.py` 的 `_step_prompt`:envelope 模式用 `_ENVELOPE_RULE` 替代 `JSON_RULE`(line 1689 `return body + JSON_RULE`);legacy 仍用 JSON_RULE(FR-006/013/014)
+- [X] T011 [US2] 改 `pipeline.py` 的 `_run_step`(line ~2379 `s.output_json = extract_json(res.text)`):envelope 模式下 `extract_json` 后调 `_unwrap_envelope`,把 artifact 回填 `s.output_json`,把 (action, mentions, intent, reason) 暂存到 step(如 `s._envelope = {...}`)供 overlay 用(FR-008/012/016)
+- [X] T012 [US2] 确认 T011 后既有 needs_retry/needs_help 信号读取(line ~2396 读 s.output_json)无需改 —— unwrap 已把 artifact 回填 s.output_json(research 决策 2 派生发现);加注释说明
+- [X] T013 [US2] 改 `pipeline.py` 的 `_emit_v2_step_overlay`(line ~1782):envelope 模式从 step 暂存的信封读 mentions/intent/action;`action=speak`→现有 AgentSpeak(mentions,intent)+ArtifactUpdate;`action=silent`→emit AgentSilent(reason)、不产 artifact、不点名;`action=done`→mentions 空(走 quiescence→gatekeeper);legacy 模式保持从 handoff 合成(FR-009/010/011,research 决策 5)
+- [X] T014 [P] [US2] 新增 `apps/web-backend/tests/orchestrator/test_envelope_parse.py`:测 `_unwrap_envelope` 信封格式(取 artifact)、旧格式(整体当 artifact+action 推断 speak+handoff.to)、缺 action、artifact 非 dict、action 非法、parsed=None 六种(FR-007/008/012,US2-AC4)
+- [X] T015 [P] [US2] 新增 `apps/web-backend/tests/orchestrator/test_p5_e2e.py`:ScriptedBackend envelope 模式跑链式闭环(同 test_v2_workdriver 风格),断言 artifact 正确 unwrap、speak mentions 驱动下游、silent 不产 artifact、done→gatekeeper 收尾(US2-AC1/2/3,SC-002)
+- [X] T016 [US2] 在 test_p5_e2e.py 加 SC-005 断言:envelope 包裹再解出的业务产物(如 copywriting 的 script_md/slides)与 legacy 模式逐字段一致
 
 **Checkpoint**: US2 可独立验收 —— 信封契约 + transcript 双双工作于 envelope 模式。
 
@@ -63,8 +63,8 @@
 **Goal**: flag 一键切换;legacy 字段级零回归;真 LLM 端到端跑通。
 **Independent Test**: legacy 跑回归套件全绿+字段级一致;envelope 跑新测试绿;切换仅改 env。
 
-- [ ] T017 [P] [US3] 扩 `apps/web-backend/tests/orchestrator/test_v1_regression.py`:显式断言 `V2_PROMPT_MODE` 未设/legacy 时,`_step_prompt` 不含 transcript、用 JSON_RULE、`_unwrap_envelope` 对旧格式恒等(s.output_json 与 extract_json 直出一致)(FR-014,SC-001)
-- [ ] T018 [US3] 跑全量 `pytest apps/web-backend/tests -q` 确认 legacy 零回归(原基线 + 新增全绿),记录数字到 tasks.md 收尾
+- [X] T017 [P] [US3] 扩 `apps/web-backend/tests/orchestrator/test_v1_regression.py`:显式断言 `V2_PROMPT_MODE` 未设/legacy 时,`_step_prompt` 不含 transcript、用 JSON_RULE、`_unwrap_envelope` 对旧格式恒等(s.output_json 与 extract_json 直出一致)(FR-014,SC-001)
+- [X] T018 [US3] 跑全量 `pytest apps/web-backend/tests -q` 确认 legacy 零回归(原基线 + 新增全绿),记录数字到 tasks.md 收尾
 - [ ] T019 [US3] 真 LLM 端到端(quickstart §3):`V2_PROMPT_MODE=envelope` 起后端 + 提交 1 个 v2 task,用真实 task_id 轮询,断言 task.json status∈{done,partial}、8 step 全 success、events 无解析失败/KeyError(SC-003);失败若因 deepseek 网络抖动则重试(spec 假设),非契约问题
 - [ ] T020 [US3] 回退验证(quickstart §4):去 flag 重起,重跑 task 仍等价 P4 跑通(FR-015)
 

@@ -568,6 +568,10 @@ class AgentWorker:
                       {"visit_no": st.visited[self.step_key]})
 
         try:
+            # P5(spec 005):把 state 经 prev 传给 pipeline,供 _step_prompt 取 observer
+            # 渲染 transcript_tail(envelope 模式)。__state__ 是 prev 里的特殊 key,
+            # 与 __phase1__/__candidates__ 同惯例,pipeline 读 step 产物时跳过 __ 开头。
+            st.prev["__state__"] = st
             await self._run_step(s, st.run, st.prev)
         except Exception as e:  # noqa: BLE001
             log.exception("worker %s · _run_step crashed: %s", self.agent_id, e)

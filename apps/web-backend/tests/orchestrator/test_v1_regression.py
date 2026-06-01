@@ -374,3 +374,43 @@ async def test_v1_no_reviewer_verdict_events(tmp_outputs_dir):
     raw = events_path.read_text(encoding="utf-8")
     for forbidden in ("reviewer.verdict", "needs_fix", "process_logic", "suggested_fix_agent"):
         assert forbidden not in raw, f"v1 events.jsonl 不应含 P4 词 {forbidden!r}"
+
+
+# ────────────────────────── P5 legacy 零回归(T017 · FR-014 / SC-001) ──────────────────────────
+
+
+def test_p5_envelope_disabled_in_legacy_mode():
+    """legacy → _envelope_enabled() False;envelope → True(flag 控制)。"""
+    from app.orchestrator import pipeline, subscription
+    orig = subscription.V2_PROMPT_MODE
+    try:
+        subscription.V2_PROMPT_MODE = "legacy"
+        assert pipeline._envelope_enabled() is False
+        subscription.V2_PROMPT_MODE = "envelope"
+        assert pipeline._envelope_enabled() is True
+    finally:
+        subscription.V2_PROMPT_MODE = orig
+
+
+def test_p5_legacy_step_prompt_no_transcript_uses_json_rule():
+    """legacy 模式 _step_prompt:不含群聊上下文 + 用 JSON_RULE(与 P4 字段级一致)。"""
+    from app.orchestrator import pipeline, subscription
+    run = type("R", (), {"report_type": "x", "audience": "领导", "duration": "1分钟",
+                         "style": "", "supplement": "", "agent_briefs": {}})()
+    orig = subscription.V2_PROMPT_MODE
+    try:
+        subscription.V2_PROMPT_MODE = "legacy"
+        prompt = pipeline._step_prompt("structure_building", run, {})
+        assert "群聊上下文" not in prompt
+        assert "群聊信封" not in prompt
+        assert "结构化结果" in prompt
+    finally:
+        subscription.V2_PROMPT_MODE = orig
+
+
+def test_p5_legacy_unwrap_identity_on_old_format():
+    """旧格式 dict 经 _unwrap_envelope 整体即 artifact(output_json 不变 → 零回归)。"""
+    from app.orchestrator.pipeline import _unwrap_envelope
+    typed = {"chapters": [1, 2], "pattern": "总分总"}
+    _, _, _, _, artifact = _unwrap_envelope(typed)
+    assert artifact == typed
