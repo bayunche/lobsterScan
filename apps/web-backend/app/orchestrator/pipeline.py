@@ -709,18 +709,41 @@ def _step_artifacts(task_id: str, step: str, has_json: bool, has_text: bool = Tr
     return items
 
 
-def _chat_msg(agent: str, text: str, kind: str = "result") -> dict:
-    """构造一条 chat.message 事件 payload."""
+# P7(spec 007-chat-ux):核心 artifact → 中文友好名(diff 行用,脱敏不暴露内部 id)。
+ARTIFACT_DISPLAY: dict[str, str] = {
+    "MaterialPool": "素材池", "ReportCore": "重点", "Outline": "大纲", "Script": "讲稿",
+}
+
+
+def _chat_msg(
+    agent: str, text: str, kind: str = "result",
+    *,
+    mentions: list[str] | None = None,
+    silent_reason: str | None = None,
+    artifact_delta: dict | None = None,
+) -> dict:
+    """构造一条 chat.message 事件 payload.
+
+    P7(spec 007-chat-ux):mentions / silent_reason / artifact_delta 为 additive 可选字段,
+    非 None 才写入(不污染旧消息,旧前端忽略 → 零回归 FR-004)。
+    """
     import uuid as _uuid
-    return {
+    msg = {
         "id": _uuid.uuid4().hex[:12],
         "agent": agent,
         "display_name": AGENT_DISPLAY.get(agent, agent),
         "avatar": AGENT_AVATAR.get(agent, "🤖"),
         "ts": time.time(),
-        "kind": kind,                          # intro | result | error | user | system
+        "kind": kind,                          # intro | result | error | user | system | silent
         "text": text,
     }
+    if mentions:
+        msg["mentions"] = mentions
+    if silent_reason is not None:
+        msg["silent_reason"] = silent_reason
+    if artifact_delta is not None:
+        msg["artifact_delta"] = artifact_delta
+    return msg
 
 
 # 保存全任务的群聊历史（用于 reconnect / 历史回放）
@@ -1964,11 +1987,25 @@ async def _emit_v2_step_overlay(
         try:
             payload = extractor(step.output_json or {})
             if payload:
-                await write_versioned(
+                delta_summary = f"{step.step} 产物 by {producer}"
+                new_v = await write_versioned(
                     state=state, artifact_id=artifact_id, payload=payload,
                     producer=producer, base_version=None,
-                    delta_summary=f"{step.step} 产物 by {producer}",
+                    delta_summary=delta_summary,
                 )
+                # P7(spec 007 US3):更新已有 artifact(version≥2)→ 推一条带 artifact_delta
+                # 的 chat.message,前端内联 diff 行。首版(v1)不推(不是"改")(FR-003/007)。
+                if isinstance(new_v, int) and new_v >= 2:
+                    diff_msg = _chat_msg(
+                        producer, "", kind="result",
+                        artifact_delta={
+                            "id": ARTIFACT_DISPLAY.get(artifact_id, artifact_id),
+                            "version": new_v,
+                            "summary": delta_summary,
+                        },
+                    )
+                    _persist_chat(run, diff_msg)
+                    await _broadcast(run, "chat.message", diff_msg)
         except Exception as e:  # noqa: BLE001 — FR-020 降级
             log.warning("v2 per-step write_versioned %s failed: %s", artifact_id, e)
 
@@ -1981,10 +2018,16 @@ async def _emit_v2_step_overlay(
 
         # silent:不产 artifact、不点名,emit AgentSilent(reason)(FR-010)
         if envelope and envelope.get("action") == "silent":
+            reason = (envelope.get("reason") or "无补充")[:200]
             await state.emit_v2(AgentSilent(
                 task_id=run.task_id, **{"from": producer_agent_id},
-                reply_to=None, reason=(envelope.get("reason") or "无补充")[:200],
+                reply_to=None, reason=reason,
             ))
+            # P7(spec 007 US2):silent 也推一条 kind=silent 的 chat.message,
+            # 前端渲染灰显「掠过」气泡(否则用户看不到它在场只是没话说)(FR-002)。
+            silent_msg = _chat_msg(producer_agent_id, "", kind="silent", silent_reason=reason)
+            _persist_chat(run, silent_msg)
+            await _broadcast(run, "chat.message", silent_msg)
             return
 
         if envelope is not None:

@@ -21,7 +21,7 @@
 
 **目标**:`_chat_msg` 支持透传新字段,前端 ChatMsg 类型扩展。两端类型就位后各 US 才能渲染。
 
-- [ ] T003 改 `pipeline.py` 的 `_chat_msg`(line ~712):加 keyword-only 可选参数 `mentions=None / silent_reason=None / artifact_delta=None`,非 None 才写入 payload(additive,现有调用零改动)(FR-001/003/004,research 决策 1)
+- [X] T003 改 `pipeline.py` 的 `_chat_msg`(line ~712):加 keyword-only 可选参数 `mentions=None / silent_reason=None / artifact_delta=None`,非 None 才写入 payload(additive,现有调用零改动)(FR-001/003/004,research 决策 1)
 - [ ] T004 [P] 改 `apps/web-frontend/app/page.tsx` 的 `ChatMsg` 类型:加 `mentions?: string[]` / `silent_reason?: string` / `artifact_delta?: {id;version;summary}`,`kind` 加 `"silent"`(data-model §2)
 
 ---
@@ -44,10 +44,10 @@
 **Goal**: silent 成员显示灰色「掠过」小气泡。
 **Independent Test**: 后端推 kind=silent + reason → 灰显气泡含成员名 + 理由;普通消息不受影响。
 
-- [ ] T008 [US2] 改 `pipeline.py`:v2 路径 AgentSilent emit 处(is_v2 守卫内)额外 `_broadcast(run, "chat.message", _chat_msg(agent, "", kind="silent", silent_reason=reason))`(FR-002,research 决策 2;仅 v2,v1 不推)
+- [X] T008 [US2] 改 `pipeline.py`:v2 路径 AgentSilent emit 处(is_v2 守卫内)额外 `_broadcast(run, "chat.message", _chat_msg(agent, "", kind="silent", silent_reason=reason))`(FR-002,research 决策 2;仅 v2,v1 不推)
 - [ ] T009 [US2] 在 `page.tsx` Bubble 加 `kind==="silent"` 分支:灰色虚线小气泡「{display_name} 掠过{· reason}」,比正常气泡淡(复用 bb-intro 风格弱化)(FR-006/008)
 - [ ] T010 [P] [US2] 在 Bubble.test.tsx 加 silent 用例:kind=silent + silent_reason → 渲染含「掠过」+ 成员名 + 理由(US2-AC1);无 reason → 仅「{名} 掠过」不报错(edge case)
-- [ ] T011 [P] [US2] 后端 pytest:新增/扩 `apps/web-backend/tests/` 断言 `_chat_msg(agent,"",kind="silent",silent_reason="x")` payload 含 kind=silent + silent_reason(FR-002)
+- [X] T011 [P] [US2] 后端 pytest:新增/扩 `apps/web-backend/tests/` 断言 `_chat_msg(agent,"",kind="silent",silent_reason="x")` payload 含 kind=silent + silent_reason(FR-002)
 
 **Checkpoint**: US2 可独立验收 —— silent 气泡可见。
 
@@ -58,10 +58,10 @@
 **Goal**: 更新已有产物(version≥2)时气泡内联「📝 改了 {产物名} 第 N 版:{摘要}」。
 **Independent Test**: 后端推带 artifact_delta(v≥2)→ diff 行出现;v1 不出现。
 
-- [ ] T012 [US3] 在 `pipeline.py` 加 artifact 中文友好名映射(MaterialPool→素材池 / ReportCore→重点 / Outline→大纲 / Script→讲稿);result_msg 生成处,若对应核心 artifact version≥2 → 附 `artifact_delta={id:中文名, version, summary:delta_summary}`(FR-003/007/008,research 决策 3)
+- [X] T012 [US3] 在 `pipeline.py` 加 artifact 中文友好名映射(MaterialPool→素材池 / ReportCore→重点 / Outline→大纲 / Script→讲稿);result_msg 生成处,若对应核心 artifact version≥2 → 附 `artifact_delta={id:中文名, version, summary:delta_summary}`(FR-003/007/008,research 决策 3)
 - [ ] T013 [US3] 在 `page.tsx` Bubble 加 `artifact_delta` 内联行渲染:「📝 改了 {id} 第 {version} 版{:summary}」;无 artifact_delta 不显示(FR-007)
 - [ ] T014 [P] [US3] 在 Bubble.test.tsx 加 diff 用例:artifact_delta version=2 → diff 行出现含产物名/版本/摘要(US3-AC1);version=1 的消息(或无 artifact_delta)→ 无 diff 行(US3-AC2)
-- [ ] T015 [P] [US3] 后端 pytest:断言 result_msg 对 version≥2 核心 artifact 附 artifact_delta(中文友好名)、version1 不附(FR-003)
+- [X] T015 [P] [US3] 后端 pytest:断言 result_msg 对 version≥2 核心 artifact 附 artifact_delta(中文友好名)、version1 不附(FR-003)
 
 **Checkpoint**: US3 可独立验收 —— diff 行可见。
 
