@@ -175,7 +175,18 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** ✅ Implemented
+Active spec-driven feature: **P6 — EventBus fan-out 并发 + html/video 真并行** 🚧 Planning
+- Plan:       `specs/006-concurrency-fanout/plan.md`
+- Spec:       `specs/006-concurrency-fanout/spec.md`
+- Research:   `specs/006-concurrency-fanout/research.md` (4 决策 + 现状核实)
+- Data model: `specs/006-concurrency-fanout/data-model.md` (V2_FANOUT / COPYWRITING_FANOUT / inflight 峰值)
+- Quickstart: `specs/006-concurrency-fanout/quickstart.md`
+- Design:     `docs/superpowers/specs/2026-06-01-p6-concurrency-design.md`
+- Constitution: `.specify/memory/constitution.md` (v1.1.0;P6 **无需新宪章修订** — 执行优化,不改 Coordinator/Reviewer 职责)
+- (contracts/ skipped — 复用 P1 v2 事件 schema;纯执行行为变化)
+
+Previously shipped (still authoritative for code):
+- **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** ✅ Implemented
 - Plan:       `specs/005-transcript-aware-prompt/plan.md`
 - Spec:       `specs/005-transcript-aware-prompt/spec.md`
 - Research:   `specs/005-transcript-aware-prompt/research.md` (5 决策 + 派生发现)
