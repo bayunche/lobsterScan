@@ -175,7 +175,25 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P7 — 群聊 UX(@高亮 + silent 灰显 + artifact diff + prompt 模板)** ✅ Implemented
+Active spec-driven feature: **P8 — 运营兜底(budget hard-cap + rolling summary + yes-man 防御)** 🚧 Planning→Tasks
+- Plan:       `specs/008-ops-safety-net/plan.md`
+- Spec:       `specs/008-ops-safety-net/spec.md` (US1 预算硬上限 P1 / US2 rolling summary P2 / US3 yes-man P3;18 FR + 6 SC)
+- Research:   `specs/008-ops-safety-net/research.md` (5 决策 + 现状核实)
+- Data model: `specs/008-ops-safety-net/data-model.md` (4 flag + spent_tokens/budget_exceeded + 折叠算法 + yesman 块)
+- Quickstart: `specs/008-ops-safety-net/quickstart.md` (pytest 三轨 + 零回归 + 1 次真 LLM 端到端)
+- Design:     `docs/superpowers/specs/2026-06-02-p8-ops-safety-net-design.md`
+- Constitution: `.specify/memory/constitution.md` (v1.1.0;P8 **无需新宪章修订** — 原则 IV 明列「预算逼近发声」为合法 observer 职责;budget 纯规则 + 复用 gatekeeper / rolling 默认纯规则 / yesman prompt 工程)
+- (contracts/ skipped — 复用 P1 v2 事件 schema;`CoordinatorIntervene.kind` 的 Literal 已含 `budget`,无 schema 改动)
+计划落点:`subscription.py` +4 flag(`V2_BUDGET_CAP=0`/`V2_ROLLING_SUMMARY=off`/`V2_SUMMARY_THRESHOLD=20`/`V2_YESMAN_DEFENSE=off`,
+      默认全关→零回归,正交 P5/P6)+ `harness.py`(`HarnessState.{spent_tokens,budget_exceeded}` + `_run_step` 累计 +
+      `force_run_v2`/SPEAK 派发短路)+ `coordinator_observer.py`(`_loop` budget 检测 + `_on_budget_exceeded` 软着陆
+      复用 `gate.check`/`_emit_intervene`/`_set_done`)+ `pipeline.py`(`_transcript_block` 折叠 + `_yesman_block` 注入
+      `QUICK_REVIEW_PROMPT`「一处覆盖 _gate_review + harness 质量审两轨」+ 3 个 `_*_enabled` helper)。
+关键:四 flag 全默认关 ⇒ 逐字段 = P7(零回归);budget 软着陆软停(挡新 turn 不取消运行中,产物保留);
+      rolling 反向减 prompt token,与 budget 互补;yesman 注入一处覆盖两条 review 路径。
+
+Previously shipped (still authoritative for code):
+- **P7 — 群聊 UX(@高亮 + silent 灰显 + artifact diff + prompt 模板)** ✅ Implemented
 - Plan:       `specs/007-chat-ux/plan.md`
 - Spec:       `specs/007-chat-ux/spec.md`
 - Research:   `specs/007-chat-ux/research.md` (5 决策)
