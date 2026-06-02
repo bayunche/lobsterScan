@@ -175,16 +175,28 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P7 — 群聊 UX(@高亮 + silent 灰显 + artifact diff + prompt 模板)** 🚧 Planning
+Active spec-driven feature: **P7 — 群聊 UX(@高亮 + silent 灰显 + artifact diff + prompt 模板)** ✅ Implemented
 - Plan:       `specs/007-chat-ux/plan.md`
 - Spec:       `specs/007-chat-ux/spec.md`
 - Research:   `specs/007-chat-ux/research.md` (5 决策)
 - Data model: `specs/007-chat-ux/data-model.md` (chat.message additive 字段 + Bubble 渲染分支 + prompt 模板)
 - Quickstart: `specs/007-chat-ux/quickstart.md` (pytest + Vitest + next build + CDP 实测)
+- Tasks:      `specs/007-chat-ux/tasks.md` (23/24;T021 CDP 浏览器实测因环境网络阻 deferred,脚本就位)
 - Design:     `docs/superpowers/specs/2026-06-01-p7-chat-ux-design.md`
 - Constitution: `.specify/memory/constitution.md` (v1.1.0;P7 **无需新宪章修订** — 纯 UX + additive 字段,守原则 I 脱敏)
 - (contracts/ skipped — chat.message 内部 SSE 消息,additive 字段在 data-model 描述)
-- 首个跨前后端 spec feature:后端 `_chat_msg` additive 字段 + 前端 page.tsx Bubble + 新增 Vitest 基建 + Playwright CDP 实测
+Code: 后端 `apps/web-backend/app/orchestrator/pipeline.py`(`_chat_msg` 加 keyword-only
+      mentions/silent_reason/artifact_delta + `ARTIFACT_DISPLAY` 中文友好名 +
+      `_emit_v2_step_overlay` silent 推 kind=silent / write_versioned version≥2 推 artifact_delta)
+      + 前端 `apps/web-frontend/components/Bubble.tsx`(从 page.tsx 抽出:Bubble + renderWithMentions
+      @高亮 + silent 气泡 + diff 行 + PROMPT_TEMPLATES + MEMBERS + 子组件;Next page 不允许 named export)
+      + `app/page.tsx`(import Bubble/MEMBERS/PROMPT_TEMPLATES;refine chips 改模板填入输入框)
+      + Vitest 基建(`vitest.config.ts`/`vitest.setup.ts`/`package.json` test script)
+Tests: `apps/web-frontend/__tests__/Bubble.test.tsx`(11 绿:@高亮 5 + silent 2 + diff 2 + 模板 2)
+      + 后端 `tests/orchestrator/test_p7_chat_fields.py`(7 绿)。后端全量 141 passed(零回归)。
+      next build 通过。CDP 脚本 `scripts/p7_cdp_smoke.py` 就位(Chromium 下载受环境网络阻,实测 deferred)。
+关键:additive 字段旧前端忽略 → 零回归;silent 推送仅 v2 路径;@高亮显示中文名(守原则 I 脱敏)。
+首个跨前后端 spec feature。用户 @<agent> 进群单聊 deferred。
 
 Previously shipped (still authoritative for code):
 - **P6 — EventBus fan-out 并发 + html/video 真并行** ✅ Implemented
