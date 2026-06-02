@@ -175,7 +175,19 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P6 — EventBus fan-out 并发 + html/video 真并行** ✅ Implemented
+Active spec-driven feature: **P7 — 群聊 UX(@高亮 + silent 灰显 + artifact diff + prompt 模板)** 🚧 Planning
+- Plan:       `specs/007-chat-ux/plan.md`
+- Spec:       `specs/007-chat-ux/spec.md`
+- Research:   `specs/007-chat-ux/research.md` (5 决策)
+- Data model: `specs/007-chat-ux/data-model.md` (chat.message additive 字段 + Bubble 渲染分支 + prompt 模板)
+- Quickstart: `specs/007-chat-ux/quickstart.md` (pytest + Vitest + next build + CDP 实测)
+- Design:     `docs/superpowers/specs/2026-06-01-p7-chat-ux-design.md`
+- Constitution: `.specify/memory/constitution.md` (v1.1.0;P7 **无需新宪章修订** — 纯 UX + additive 字段,守原则 I 脱敏)
+- (contracts/ skipped — chat.message 内部 SSE 消息,additive 字段在 data-model 描述)
+- 首个跨前后端 spec feature:后端 `_chat_msg` additive 字段 + 前端 page.tsx Bubble + 新增 Vitest 基建 + Playwright CDP 实测
+
+Previously shipped (still authoritative for code):
+- **P6 — EventBus fan-out 并发 + html/video 真并行** ✅ Implemented
 - Plan:       `specs/006-concurrency-fanout/plan.md`
 - Spec:       `specs/006-concurrency-fanout/spec.md`
 - Research:   `specs/006-concurrency-fanout/research.md` (4 决策 + 现状核实)
