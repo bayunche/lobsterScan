@@ -43,6 +43,7 @@ __all__ = [
     "V2_INBOX_MAX",
     "V2_PROMPT_MODE",
     "V2_TRANSCRIPT_K",
+    "V2_FANOUT",
     "Predicate",
     "mention_includes",
     "hint_agent_is",
@@ -70,6 +71,11 @@ V2_INBOX_MAX: int = int(os.environ.get("V2_INBOX_MAX", "32"))
 # 默认 legacy → P5 全部新代码短路,零回归(FR-014)。每次读以支持测试 monkeypatch。
 V2_PROMPT_MODE: str = os.environ.get("V2_PROMPT_MODE", "legacy")
 V2_TRANSCRIPT_K: int = int(os.environ.get("V2_TRANSCRIPT_K", "8"))
+
+# P6(spec 006-concurrency-fanout):并发开关。off(默认)= 今天行为(串行 emit +
+# copywriting 单 mention);on = EventBus.emit gather 并发 + copywriting 同时 @
+# html-designer + video-producer 真并行。与 V2_PROMPT_MODE 正交。默认 off → 零回归。
+V2_FANOUT: str = os.environ.get("V2_FANOUT", "off")
 
 
 # ────────────────────────────── 谓词 ──────────────────────────────

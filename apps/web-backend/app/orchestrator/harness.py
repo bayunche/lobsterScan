@@ -63,6 +63,19 @@ class AgentEvent:
         }
 
 
+def _fanout_enabled_safe() -> bool:
+    """P6(spec 006):EventBus 是否并发 dispatch(V2_FANOUT == on)。
+
+    直接读 subscription.V2_FANOUT(避免 import pipeline 造成循环依赖);
+    每次读以支持测试 monkeypatch。异常 → off(FR-013 降级)。
+    """
+    try:
+        from . import subscription as _sub
+        return getattr(_sub, "V2_FANOUT", "off") == "on"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class EventBus:
     """In-memory async pub/sub。handlers 必须是 async。"""
 
@@ -77,13 +90,20 @@ class EventBus:
         self._wild.append(handler)
 
     async def emit(self, event: AgentEvent) -> None:
+        handlers = list(self._wild) + list(self._subs.get(event.kind, []))
+        # P6(spec 006-concurrency-fanout):fanout on → 并发 dispatch;off(默认)→ 原串行。
+        # 去重不依赖 emit 串行(靠 per-agent lock + step.status==success 跳过,research 决策 1)。
+        if _fanout_enabled_safe():
+            async def _safe(h):
+                try:
+                    await h(event)
+                except Exception as e:  # noqa: BLE001 — FR-007/013 异常隔离
+                    log.exception("handler crashed on %s: %s", event.kind, e)
+            # return_exceptions 冗余(_safe 已吞),保留作双保险
+            await asyncio.gather(*[_safe(h) for h in handlers], return_exceptions=True)
+            return
         # 串行 dispatch(确保 visited / route 顺序确定;handler 自己应避免阻塞)
-        for h in list(self._wild):
-            try:
-                await h(event)
-            except Exception as e:  # noqa: BLE001
-                log.exception("wildcard handler crashed on %s: %s", event.kind, e)
-        for h in list(self._subs.get(event.kind, [])):
+        for h in handlers:
             try:
                 await h(event)
             except Exception as e:  # noqa: BLE001

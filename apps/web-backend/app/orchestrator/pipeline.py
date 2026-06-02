@@ -235,6 +235,23 @@ def _envelope_enabled() -> bool:
         return False
 
 
+# P6(spec 006-concurrency-fanout):copywriting 完成后并行触发的下游(都依赖 Script,
+# 不同 agentDir、不写核心 artifact)。fanout on 时 overlay mentions 取这两个。
+COPYWRITING_FANOUT: tuple[str, ...] = ("html-designer", "video-producer")
+
+
+def _fanout_enabled() -> bool:
+    """是否启用 P6 并发(V2_FANOUT == on):EventBus.emit 并发 + copywriting 双 @。
+
+    每次读 subscription.V2_FANOUT(支持测试 monkeypatch)。默认 off → 零回归(FR-011)。
+    """
+    try:
+        from . import subscription as _sub
+        return getattr(_sub, "V2_FANOUT", "off") == "on"
+    except Exception:  # noqa: BLE001 — FR-013 降级:读取异常按 off
+        return False
+
+
 def _transcript_block(state: Any, k: int | None = None) -> str:
     """渲染「群聊上下文」段落:最近 K 条发言 + 当前可见 artifact 摘要(FR-001/002/003/004/005)。
 
@@ -1988,6 +2005,14 @@ async def _emit_v2_step_overlay(
                     if next_agent:
                         mentions = [next_agent]
             intent = "propose"
+
+        # P6(spec 006):fanout on 时 copywriting 完成 → 同时 @ html-designer + video-producer
+        # 并行(二者同依赖 Script、不同 agentDir、不写核心 artifact)。legacy 取常量双目标;
+        # envelope 若 LLM 已给全则尊重,否则补齐缺失者(双保险,FR-001)。off 时不动(FR-005)。
+        if step.step == "copywriting" and _fanout_enabled():
+            for tgt in COPYWRITING_FANOUT:
+                if tgt not in mentions:
+                    mentions.append(tgt)
 
         # text: 复用 _summarize_output;若空降级为 step 显示名
         text = _summarize_output(

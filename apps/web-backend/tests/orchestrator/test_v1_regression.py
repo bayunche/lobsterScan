@@ -414,3 +414,48 @@ def test_p5_legacy_unwrap_identity_on_old_format():
     typed = {"chapters": [1, 2], "pattern": "总分总"}
     _, _, _, _, artifact = _unwrap_envelope(typed)
     assert artifact == typed
+
+
+# ────────────────────────── P6 fanout off 零回归(T012 · FR-011 / SC-001) ──────────────────────────
+
+
+def test_p6_fanout_disabled_by_default():
+    """fanout off → _fanout_enabled() / _fanout_enabled_safe() False;on → True。"""
+    from app.orchestrator import pipeline, subscription
+    from app.orchestrator.harness import _fanout_enabled_safe
+    orig = subscription.V2_FANOUT
+    try:
+        subscription.V2_FANOUT = "off"
+        assert pipeline._fanout_enabled() is False
+        assert _fanout_enabled_safe() is False
+        subscription.V2_FANOUT = "on"
+        assert pipeline._fanout_enabled() is True
+        assert _fanout_enabled_safe() is True
+    finally:
+        subscription.V2_FANOUT = orig
+
+
+@pytest.mark.asyncio
+async def test_p6_fanout_off_eventbus_serial(tmp_outputs_dir):
+    """fanout off:EventBus.emit 串行,注册顺序执行(FR-009 / SC-001)。"""
+    from app.orchestrator import subscription
+    from app.orchestrator.harness import EventBus, AgentEvent
+    orig = subscription.V2_FANOUT
+    try:
+        subscription.V2_FANOUT = "off"
+        bus = EventBus()
+        order: list[str] = []
+
+        async def h1(e):
+            await asyncio.sleep(0.02)
+            order.append("h1")
+
+        async def h2(e):
+            order.append("h2")
+
+        bus.on("k", h1)
+        bus.on("k", h2)
+        await bus.emit(AgentEvent(kind="k", agent_id="a", step_key=None, payload={}))
+        assert order == ["h1", "h2"]   # 串行(h1 先,即便慢)
+    finally:
+        subscription.V2_FANOUT = orig
