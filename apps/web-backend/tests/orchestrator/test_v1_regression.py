@@ -459,3 +459,95 @@ async def test_p6_fanout_off_eventbus_serial(tmp_outputs_dir):
         assert order == ["h1", "h2"]   # 串行(h1 先,即便慢)
     finally:
         subscription.V2_FANOUT = orig
+
+
+# ────────────────────────── P8 零回归(spec 008-ops-safety-net) ──────────────────────────
+
+
+def test_p8_flags_default_off():
+    """三能力 helper 默认关:_rolling_enabled / _yesman_enabled False;V2_BUDGET_CAP 0(FR-002)。"""
+    from app.orchestrator import pipeline, subscription
+    assert subscription.V2_BUDGET_CAP == 0
+    assert subscription.V2_ROLLING_SUMMARY == "off"
+    assert subscription.V2_YESMAN_DEFENSE == "off"
+    assert pipeline._rolling_enabled() is False
+    assert pipeline._yesman_enabled() is False
+
+
+def test_p8_transcript_block_unchanged_when_rolling_off():
+    """rolling off → _transcript_block 走 recent_all[-k:],与 P5 字段级一致(SC-001)。"""
+    from app.orchestrator import pipeline, subscription
+
+    class _Obs:
+        def __init__(self, recent):
+            self._recent = recent
+            self._artifact_log = []
+
+    class _State:
+        def __init__(self, o):
+            self.observer = o
+
+    orig = subscription.V2_ROLLING_SUMMARY
+    try:
+        subscription.V2_ROLLING_SUMMARY = "off"
+        recent = [f"发言{i}" for i in range(30)]
+        out = pipeline._transcript_block(_State(_Obs(recent)), k=8)
+        assert "已折叠" not in out          # 不折叠
+        assert "发言29" in out and "发言22" in out and "发言21" not in out  # 仅最近 8
+    finally:
+        subscription.V2_ROLLING_SUMMARY = orig
+
+
+@pytest.mark.asyncio
+async def test_p8_quick_review_prompt_unchanged_when_yesman_off():
+    """yesman off → 发给 reviewer 的 message 不含对立质疑段,与 P7 一致(FR-018/SC-001)。"""
+    from app.orchestrator import pipeline, subscription
+
+    class _Step:
+        agent = "material"; label = "资料员 · 整理材料"; output_json = {"payload": {}}
+
+    class _Run:
+        task_id = "tsk_reg"; duration = "3分钟"
+
+    class _Res:
+        provider = "x"; model = "m"; prompt_tokens = 1; completion_tokens = 1; total_tokens = 2
+        text = '```json\n{"accept": true, "comment": "OK", "reason_if_reject": null}\n```'
+
+    captured: list[str] = []
+
+    async def _env(a): return {}
+    async def _turn(agent_id, message, timeout_sec=90, extra_env=None, **kw):
+        captured.append(message); return _Res()
+    async def _usage(**kw): return None
+
+    orig = subscription.V2_YESMAN_DEFENSE
+    import pytest as _pt
+    mp = _pt.MonkeyPatch()
+    try:
+        subscription.V2_YESMAN_DEFENSE = "off"
+        mp.setattr(pipeline, "env_for_agent", _env)
+        mp.setattr(pipeline, "run_agent_turn", _turn)
+        mp.setattr(pipeline, "report_usage", _usage)
+        await pipeline._quick_review(_Step(), _Run())
+        assert "对立质疑" not in captured[0]
+    finally:
+        mp.undo()
+        subscription.V2_YESMAN_DEFENSE = orig
+
+
+def test_p8_budget_disabled_no_short_circuit():
+    """V2_BUDGET_CAP=0 → observer 检测短路;budget_exceeded 默认 False → 派发不短路(SC-001)。"""
+    from app.orchestrator import subscription
+    from app.orchestrator.harness import HarnessState, EventBus
+    from app.orchestrator.coordinator_observer import CoordinatorObserver
+    orig = subscription.V2_BUDGET_CAP
+    try:
+        subscription.V2_BUDGET_CAP = 0
+        st = HarnessState(run=type("R", (), {"task_id": "tsk_reg"})(),
+                          prev={}, by_key={}, bus=EventBus(), is_v2=True)
+        st.spent_tokens = 10**9
+        obs = CoordinatorObserver(state=st, workers={}, goal="g")
+        assert obs._budget_exceeded_now() is False
+        assert st.budget_exceeded is False
+    finally:
+        subscription.V2_BUDGET_CAP = orig

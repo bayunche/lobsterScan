@@ -139,6 +139,9 @@ class HarnessState:
     inflight_steps: int = 0          # 正在跑的 v2 step 数(quiescence 检测用)
     bootstrapped: bool = False       # v2 起点是否已 bootstrap(去重 + quiescence 启动态)
     observer: "CoordinatorObserver | None" = None  # v2 observer watchdog
+    # P8 字段(spec 008-ops-safety-net):预算硬上限。v1 / budget 关闭时默认值不影响行为。
+    spent_tokens: int = 0            # 本任务累计消耗 token(observer 按 V2_BUDGET_CAP 检测)
+    budget_exceeded: bool = False    # 是否已触顶:短路新 turn + 软着陆去重的真相源
 
     def get_agent_lock(self, agent_id: str) -> asyncio.Lock:
         """lazy-init per-agent Lock(spec FR-008;详 research.md §3)。
@@ -436,7 +439,10 @@ class AgentWorker:
                 # agent.speak(mention),下游会被两条路径各触发一次。lock 串行 + 本处
                 # "step 已 success 则跳过"保证同一 step 在任务内只真跑一次。
                 s = st.by_key.get(self.step_key)
-                if s is not None and getattr(s, "status", None) == "success":
+                if st.budget_exceeded:
+                    # P8(spec 008):预算触顶后不启动新 turn(FR-008)。
+                    log.debug("worker %s · 预算已触顶,跳过新 turn", self.agent_id)
+                elif s is not None and getattr(s, "status", None) == "success":
                     log.debug("worker %s · step %s 已 success,跳过重复触发",
                               self.agent_id, self.step_key)
                 else:
@@ -484,7 +490,7 @@ class AgentWorker:
         step = st.by_key.get(AGENT_TO_STEP.get(getattr(event, "producer", ""), ""))
         if step is None or getattr(step, "output_json", None) is None:
             return
-        qr = await _quick_review(step, st.run)
+        qr = await _quick_review(step, st.run, st)  # P8:reviewer turn 消耗补计进预算
         verdict = _to_reviewer_verdict(
             qr, dimension="quality", fix_agent=getattr(event, "producer", ""),
             task_id=getattr(st.run, "task_id", "") or "",
@@ -526,6 +532,10 @@ class AgentWorker:
         lock = st.get_agent_lock(self.agent_id)
         acquired = False
         try:
+            # P8(spec 008):预算触顶后不启动任何新 turn(FR-008)。
+            # caller(observer)已 inflight_steps += 1,故走 finally 统一 -1 配平。
+            if st.budget_exceeded:
+                return
             from . import subscription as _sub
             wait_sec = getattr(_sub, "V2_LOCK_WAIT_SEC", 60)
             try:
@@ -598,6 +608,12 @@ class AgentWorker:
             await st.emit("agent.failed", self.agent_id, self.step_key,
                           {"error": str(e)[:300]})
             return
+
+        # P8(spec 008):累计本 step turn 的消耗(主 turn 汇集点)。缺失/异常按 0,不抛。
+        try:
+            st.spent_tokens += int(getattr(s, "total_tokens", 0) or 0)
+        except Exception:  # noqa: BLE001 — 降级:计数异常不阻塞
+            pass
 
         # 即时质量门(reviewer 介入)
         if s.status == "success" and self._gate_review is not None:

@@ -247,6 +247,9 @@ class CoordinatorObserver:
                 await asyncio.sleep(OBSERVER_TICK_SEC)
                 self._tick += 1
                 try:
+                    # P8(spec 008):预算硬上限优先于 quiescence —— 触顶即软着陆收尾。
+                    if self._budget_exceeded_now():
+                        await self._on_budget_exceeded()
                     if self._is_quiescent():
                         await self._on_quiescence()
                     if self._tick % DRIFT_EVERY_N_TICK == 0:
@@ -271,6 +274,32 @@ class CoordinatorObserver:
             if w.inbox is not None and not w.inbox.empty():
                 return False
         return True
+
+    # ── 预算硬上限（P8, spec 008-ops-safety-net） ──
+
+    def _budget_exceeded_now(self) -> bool:
+        """累计消耗是否已达 V2_BUDGET_CAP（>0 时生效）。已触顶则返回 False（只软着陆一次）。"""
+        if self.state.budget_exceeded:
+            return False
+        try:
+            from . import subscription as _sub
+            cap = int(getattr(_sub, "V2_BUDGET_CAP", 0) or 0)
+        except Exception:  # noqa: BLE001 — 降级:读取异常按关闭
+            return False
+        return cap > 0 and self.state.spent_tokens >= cap
+
+    async def _on_budget_exceeded(self) -> None:
+        """预算触顶软着陆（FR-008/009/010/011/012）:
+
+        ① 置 budget_exceeded（短路 harness 新 turn + 本方法去重真相源)；
+        ② 群里业务化发声(脱敏,FR-005/011)；
+        ③ 复用既有 gatekeeper 纯规则:核心 artifact 齐→done / 不齐→partial(FR-009)；
+           已完成产物天然保留(FR-010)。
+        """
+        self.state.budget_exceeded = True
+        await self._emit_intervene("budget", "为控制生成开销,我先用现有内容收尾。")
+        result = self.gate.check(self._task_id())
+        self._set_done("done" if result.passed else "partial")
 
     # ── quiescence 处理:gatekeeper + stagnation（T031 + T038） ──
 

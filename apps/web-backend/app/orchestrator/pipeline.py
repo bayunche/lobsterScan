@@ -252,6 +252,30 @@ def _fanout_enabled() -> bool:
         return False
 
 
+def _rolling_enabled() -> bool:
+    """是否启用 P8 rolling summary 折叠(V2_ROLLING_SUMMARY == on)。
+
+    每次读 subscription.V2_ROLLING_SUMMARY(支持测试 monkeypatch)。默认 off → 零回归。
+    """
+    try:
+        from . import subscription as _sub
+        return getattr(_sub, "V2_ROLLING_SUMMARY", "off") == "on"
+    except Exception:  # noqa: BLE001 — 降级:读取异常按 off
+        return False
+
+
+def _yesman_enabled() -> bool:
+    """是否启用 P8 yes-man 防御(V2_YESMAN_DEFENSE == on):给审校路径注入对立质疑段。
+
+    每次读 subscription.V2_YESMAN_DEFENSE(支持测试 monkeypatch)。默认 off → 零回归。
+    """
+    try:
+        from . import subscription as _sub
+        return getattr(_sub, "V2_YESMAN_DEFENSE", "off") == "on"
+    except Exception:  # noqa: BLE001 — 降级:读取异常按 off
+        return False
+
+
 def _transcript_block(state: Any, k: int | None = None) -> str:
     """渲染「群聊上下文」段落:最近 K 条发言 + 当前可见 artifact 摘要(FR-001/002/003/004/005)。
 
@@ -265,13 +289,28 @@ def _transcript_block(state: Any, k: int | None = None) -> str:
         obs = getattr(state, "observer", None)
         if obs is None:
             return ""
-        recent = list(getattr(obs, "_recent", []) or [])[-k:]
+        recent_all = list(getattr(obs, "_recent", []) or [])
         artifacts = list(getattr(obs, "_artifact_log", []) or [])
-        if not recent and not artifacts:
+        if not recent_all and not artifacts:
             return ""
         lines: list[str] = ["\n\n# 群聊上下文(最近发言)"]
-        for text in recent:
-            lines.append(f"- {str(text)[:160]}")
+        # P8(spec 008)US2:rolling summary —— 发言超阈值时折叠较早的为一行确定性摘要,
+        # 使注入条数有界(≤ k+1);关闭/未超阈值维持 recent_all[-k:] 现状(零回归)。
+        try:
+            from . import subscription as _sub
+            threshold = int(getattr(_sub, "V2_SUMMARY_THRESHOLD", 20) or 20)
+        except Exception:  # noqa: BLE001 — 降级:读取异常按默认
+            threshold = 20
+        if _rolling_enabled() and len(recent_all) > threshold:
+            folded = recent_all[:-k] if k > 0 else recent_all
+            tail = recent_all[-k:] if k > 0 else []
+            fold_text = "；".join(str(x) for x in folded)[:200]
+            lines.append(f"（前 {len(folded)} 条发言已折叠：{fold_text}）")
+            for text in tail:
+                lines.append(f"- {str(text)[:160]}")
+        else:
+            for text in recent_all[-k:]:
+                lines.append(f"- {str(text)[:160]}")
         if artifacts:
             lines.append("# 当前可见产物")
             seen: set[str] = set()
@@ -2723,6 +2762,18 @@ async def _run_step(s: StepState, run: TaskRun, prev: dict[str, StepState]) -> N
 REVIEW_GATES = {"material_parsing", "point_extraction", "upward_optimization", "copywriting"}
 
 
+# P8(spec 008-ops-safety-net):yes-man 防御 —— V2_YESMAN_DEFENSE=on 时前置到审校 prompt,
+# 抵消下方「不要过度严格」的松绑,逼审校者带挑剔立场而非橡皮图章式附和。
+_YESMAN_BLOCK = """\
+# 审校立场（对立质疑 · 务必照做）
+你不是来盖章放行的。请带着挑剔的眼光审这份产物：
+- 主动找瑕疵：假设作者可能夸大、遗漏或自说自话，逐条核对每个结论是否真站得住。
+- 发现不达标就如实指出，给出具体可执行的重做指令；**不要**用「看上去 OK」式措辞敷衍放行。
+- 只有确实没有明显问题时才 accept。
+
+"""
+
+
 QUICK_REVIEW_PROMPT = """\
 你是「会汇报」集群的质量检查员。{display} 刚完成了 {label}。请你**快速评审**他这一步的产物，给出是否接受。
 
@@ -2748,8 +2799,12 @@ QUICK_REVIEW_PROMPT = """\
 """
 
 
-async def _quick_review(s: StepState, run: TaskRun) -> dict:
-    """让 reviewer 快速点评一个 step 的产物。返回 {accept, comment, reason_if_reject}."""
+async def _quick_review(s: StepState, run: TaskRun, state: Any = None) -> dict:
+    """让 reviewer 快速点评一个 step 的产物。返回 {accept, comment, reason_if_reject}.
+
+    P8(spec 008):`state`(HarnessState)给定时,把本 reviewer turn 的消耗补计进
+    spent_tokens(覆盖 _gate_review 与 harness 质量审两条路径);yesman on 时前置对立质疑段。
+    """
     display = AGENT_DISPLAY.get(s.agent, s.agent)
     output = s.output_json or {}
     payload = output.get("payload") if isinstance(output, dict) else None
@@ -2761,6 +2816,8 @@ async def _quick_review(s: StepState, run: TaskRun) -> dict:
         output_summary=output_summary,
         duration=run.duration,
     )
+    if _yesman_enabled():  # P8 US3:对立质疑前置(一处覆盖 _gate_review + harness 质量审)
+        prompt = _YESMAN_BLOCK + prompt
     try:
         extra_env = await env_for_agent("reviewer")
         res = await run_agent_turn(
@@ -2773,6 +2830,13 @@ async def _quick_review(s: StepState, run: TaskRun) -> dict:
             prompt_tokens=res.prompt_tokens,
             completion_tokens=res.completion_tokens,
         )
+        if state is not None:  # P8 US1:reviewer turn 消耗补计进预算
+            try:
+                tok = int(getattr(res, "total_tokens", 0) or 0) \
+                    or int(res.prompt_tokens or 0) + int(res.completion_tokens or 0)
+                state.spent_tokens += tok
+            except Exception:  # noqa: BLE001 — 降级:计数异常不阻塞
+                pass
         j = extract_json(res.text) or {}
         return {
             "accept":  bool(j.get("accept", True)),
@@ -2789,7 +2853,7 @@ async def _gate_review(s: StepState, run: TaskRun, prev: dict[str, StepState]) -
     if s.step not in REVIEW_GATES or s.status != "success":
         return
 
-    verdict = await _quick_review(s, run)
+    verdict = await _quick_review(s, run, prev.get("__state__"))  # P8:reviewer 消耗补计
 
     # 反馈进群（哪怕通过也展示，让讨论感更强）
     if verdict["accept"]:

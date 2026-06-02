@@ -55,7 +55,7 @@ def _rows(p):
 def _patch_qr(monkeypatch, accept, comment="OK", reason=""):
     from app.orchestrator import pipeline
 
-    async def _fake(s, run):  # type: ignore[no-untyped-def]
+    async def _fake(s, run, state=None):  # type: ignore[no-untyped-def]
         return {"accept": accept, "comment": comment, "reason": reason}
     monkeypatch.setattr(pipeline, "_quick_review", _fake)
 

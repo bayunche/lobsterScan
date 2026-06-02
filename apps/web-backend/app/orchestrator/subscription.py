@@ -44,6 +44,10 @@ __all__ = [
     "V2_PROMPT_MODE",
     "V2_TRANSCRIPT_K",
     "V2_FANOUT",
+    "V2_BUDGET_CAP",
+    "V2_ROLLING_SUMMARY",
+    "V2_SUMMARY_THRESHOLD",
+    "V2_YESMAN_DEFENSE",
     "Predicate",
     "mention_includes",
     "hint_agent_is",
@@ -76,6 +80,18 @@ V2_TRANSCRIPT_K: int = int(os.environ.get("V2_TRANSCRIPT_K", "8"))
 # copywriting 单 mention);on = EventBus.emit gather 并发 + copywriting 同时 @
 # html-designer + video-producer 真并行。与 V2_PROMPT_MODE 正交。默认 off → 零回归。
 V2_FANOUT: str = os.environ.get("V2_FANOUT", "off")
+
+# P8(spec 008-ops-safety-net):运营兜底三能力开关 + 阈值。三者互相独立、彼此正交,
+# 也与 V2_PROMPT_MODE/V2_FANOUT/is_v2 正交。全部默认关(0/off)→ 全短路 = P7 行为(零回归)。
+# 每次读以支持测试 monkeypatch(同 V2_FANOUT 范式)。
+#   V2_BUDGET_CAP        默认 0   · 任务级 token 硬上限;0 = 不限(关闭)
+#   V2_ROLLING_SUMMARY   默认 off · 群聊上下文超阈值折叠为一行确定性摘要
+#   V2_SUMMARY_THRESHOLD 默认 20  · _recent 条数超此值才折叠
+#   V2_YESMAN_DEFENSE    默认 off · 给审校路径注入对立质疑 prompt 段
+V2_BUDGET_CAP: int = int(os.environ.get("V2_BUDGET_CAP", "0"))
+V2_ROLLING_SUMMARY: str = os.environ.get("V2_ROLLING_SUMMARY", "off")
+V2_SUMMARY_THRESHOLD: int = int(os.environ.get("V2_SUMMARY_THRESHOLD", "20"))
+V2_YESMAN_DEFENSE: str = os.environ.get("V2_YESMAN_DEFENSE", "off")
 
 
 # ────────────────────────────── 谓词 ──────────────────────────────
