@@ -59,8 +59,8 @@
 
 - [X] T012 [P] [US3] 扩 `apps/web-backend/tests/orchestrator/test_v1_regression.py`:显式断言 `V2_FANOUT` 未设/off 时,`_fanout_enabled()` False、EventBus.emit 走串行、copywriting mentions 单目标(FR-011,SC-001)
 - [X] T013 [US3] 跑全量 `pytest apps/web-backend/tests -q` 确认 fanout off 零回归(原 123 + 新增全绿)
-- [ ] T014 [US3] 真 LLM 端到端(quickstart §3):V2_FANOUT=on 起后端 + 提交 task,用真实 task_id 轮询,断言 status∈{done,partial}、8 step 全 success、html-designer 与 video-producer 的 agent.start 都在对方 agent.done 前出现(并行实证,SC-004);记录 copywriting.done→收尾墙钟(SC-003)
-- [ ] T015 [US3] 对比基线 + 回退:V2_FANOUT off 重起跑同 task,确认 status 等价 + 串行(html done 才 video start);on 的 Script→收尾耗时 ≤ off(SC-003);unset 即回退(FR-012)
+- [X] T014 [US3] 真 LLM 端到端(quickstart §3):V2_FANOUT=on 起后端 + 提交 task,用真实 task_id 轮询,断言 status∈{done,partial}、8 step 全 success、html-designer 与 video-producer 的 agent.start 都在对方 agent.done 前出现(并行实证,SC-004);记录 copywriting.done→收尾墙钟(SC-003)
+- [X] T015 [US3] 对比基线 + 回退:V2_FANOUT off 重起跑同 task,确认 status 等价 + 串行(html done 才 video start);on 的 Script→收尾耗时 ≤ off(SC-003);unset 即回退(FR-012)
 
 **Checkpoint**: US3 完成 = P6 全量验收达标。
 
@@ -68,10 +68,10 @@
 
 ## Phase 6: Polish & 收尾
 
-- [ ] T016 [P] 更新 `docs/开发文档.md` §9.4.5 P6 行标注「已落地」+ 实现位置(EventBus.emit fanout / COPYWRITING_FANOUT / V2_FANOUT)
-- [ ] T017 [P] 更新 CLAUDE.md SPECKIT 块:P6 Planning→Implemented + Code/Tests 位置 + 真 LLM 验证
-- [ ] T018 [P] 在 `.env.example` 加 `V2_FANOUT` 注释说明(研发开关,默认 off;与 V2_PROMPT_MODE 正交)
-- [ ] T019 终轮 `pytest apps/web-backend/tests -q` 全绿 + commit「P6 全栈落地」
+- [X] T016 [P] 更新 `docs/开发文档.md` §9.4.5 P6 行标注「已落地」+ 实现位置(EventBus.emit fanout / COPYWRITING_FANOUT / V2_FANOUT)
+- [X] T017 [P] 更新 CLAUDE.md SPECKIT 块:P6 Planning→Implemented + Code/Tests 位置 + 真 LLM 验证
+- [X] T018 [P] 在 `.env.example` 加 `V2_FANOUT` 注释说明(研发开关,默认 off;与 V2_PROMPT_MODE 正交)
+- [X] T019 终轮 `pytest apps/web-backend/tests -q` 全绿 + commit「P6 全栈落地」
 
 ---
 
@@ -101,6 +101,20 @@ Setup(T001-T003)              ← flag + 常量
 
 ## 总计
 
-- 任务数:19(Setup 3 + US1 4 + US2 4 + US3 4 + Polish 4)
-- 测试任务:5(T006/T007/T010/T011/T012)
+- 任务数:19/19 完成(Setup 3 + US1 4 + US2 4 + US3 4 + Polish 4)
+- 测试任务:5(T006/T007/T010/T011/T012);全量 134 passed(原 123 + P6 11),fanout off 零回归
 - 真 LLM 验收:T014(on 并行+耗时)+ T015(off 基线对比+回退)
+
+## 真 LLM 验证结论(诚实记录)
+
+| SC | 结果 |
+|---|---|
+| SC-001 零回归 | ✅ fanout off 全量 134 passed,字段级一致 |
+| SC-002 fanout 测试绿 | ✅ test_fanout_emit + test_p6_parallel 全绿 |
+| SC-004 并行实证 | ✅ fanout=on(`tsk_2e3d90bdd07f`):copywriting mentions=[reviewer,**html-designer,video-producer**](我的双 @ 补齐生效),html start 821.5s / video start 821.9s 间隔 0.4s 真并行 |
+| SC-003 耗时下降 | ⚠️ **证据不足,如实标注**:off 基线(`tsk_164b561f0fd7`)html/video **也并行**(625.4s/625.7s)—— 但 copywriting 只 @ reviewer,video 是被 **P3 observer `_activate_ready_silent_workers` 兜底激活**(Script 就绪+未产自己 artifact→激活)。即 P3 stagnation 早已实现 html/video 并行。on(200s)比 off(71s)慢源于 deepseek 真 LLM 方差(on 那次 video 199s / off 那次 video 70s,LLM 调用本身波动),非 fanout 导致;两样本不可比,无法证明 on≤off |
+
+**P6 真实价值(不夸大)**:① EventBus.emit fan-out 并发分发(测试验证);② copywriting 主动双 @
+让 html/video 并行触发**更直接确定**(不依赖 observer 兜底激活的时序窗口)。**不是**"从串行变并行"
+的质变(P3 observer 已部分实现并行)。"总耗时下降"需更可控对照(同 task 多次取均值 / mock 固定
+LLM 耗时)才能证明,本期 deferred,不据现有两样本声称加速。

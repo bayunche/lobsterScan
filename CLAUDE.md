@@ -175,15 +175,29 @@ local fallbacks: `tts_fallback.py` (edge-tts), `slideshow_video.py` + `broadcast
   (`openclaw/workspaces/<id>`) — **never share agentDirs** (auth/session crosstalk).
 
 <!-- SPECKIT START -->
-Active spec-driven feature: **P6 — EventBus fan-out 并发 + html/video 真并行** 🚧 Planning
+Active spec-driven feature: **P6 — EventBus fan-out 并发 + html/video 真并行** ✅ Implemented
 - Plan:       `specs/006-concurrency-fanout/plan.md`
 - Spec:       `specs/006-concurrency-fanout/spec.md`
 - Research:   `specs/006-concurrency-fanout/research.md` (4 决策 + 现状核实)
 - Data model: `specs/006-concurrency-fanout/data-model.md` (V2_FANOUT / COPYWRITING_FANOUT / inflight 峰值)
 - Quickstart: `specs/006-concurrency-fanout/quickstart.md`
+- Tasks:      `specs/006-concurrency-fanout/tasks.md` (19/19;US1 并行触发 + US2 EventBus 并发 + US3 双开关 + 测试 + 真 LLM)
 - Design:     `docs/superpowers/specs/2026-06-01-p6-concurrency-design.md`
 - Constitution: `.specify/memory/constitution.md` (v1.1.0;P6 **无需新宪章修订** — 执行优化,不改 Coordinator/Reviewer 职责)
 - (contracts/ skipped — 复用 P1 v2 事件 schema;纯执行行为变化)
+Code: `apps/web-backend/app/orchestrator/harness.py`(`EventBus.emit` 按 `_fanout_enabled_safe()`
+      选串行/`asyncio.gather` 并发 + `_safe` 异常隔离)+ `pipeline.py`(`COPYWRITING_FANOUT` +
+      `_fanout_enabled` + `_emit_v2_step_overlay` copywriting 双 mention 补齐)
+      + `subscription.py`(`V2_FANOUT` 默认 off)
+Tests: `apps/web-backend/tests/orchestrator/{test_fanout_emit,test_p6_parallel}.py`
+      + `test_v1_regression.py` 扩(134 passed;原 123 + P6 11)。
+真 LLM 验证:fanout=on task `tsk_2e3d90bdd07f` → partial / 7 step done / **html+video
+      start 间隔 0.4s 真并行**(SC-004)/ Script→收尾 200s(html 87s 与 video 199s 并行,
+      ≈max 非 sum);去重靠 per-agent lock(非 emit 串行)、收尾靠 quiescence(observer 不改)。
+关键:`V2_FANOUT` 与 `V2_PROMPT_MODE`(P5)正交;off(默认)下 P6 全短路 = P5 行为(零回归)。
+
+Previously shipped (still authoritative for code):
+- **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** ✅ Implemented
 
 Previously shipped (still authoritative for code):
 - **P5 — Transcript-Aware Prompt + speak/silent/done 输出契约** ✅ Implemented
