@@ -175,25 +175,48 @@ class OpenClawSubprocessBackend(AgentBackend):
         self._explicit_default_model = default_model
         self._thinking = thinking or os.environ.get("OPENCLAW_THINKING") or "low"
 
+    def _find_openclaw_mjs(self) -> Path | None:
+        """定位 `node_modules/openclaw/openclaw.mjs`(`#!/usr/bin/env node` 入口)。
+
+        候选顺序:
+          ① 显式 bin(OPENCLAW_BIN / 构造参数,通常 `.bin/openclaw`)推导 `../../openclaw/openclaw.mjs`;
+          ② 从**本文件**向上逐级找 `node_modules/openclaw/openclaw.mjs`——根治裸默认 "openclaw"
+             推导失败(P8 e2e 踩坑:不设 OPENCLAW_BIN 时 fallback 裸 bin → Windows WinError 2),
+             且不依赖 CWD。返回首个存在者,否则 None。
+        """
+        candidates: list[Path] = []
+        # ① 显式 bin 推导(仅当不是裸默认名时,裸名 resolve 受 CWD 影响不可靠)
+        if self._bin and self._bin != "openclaw":
+            try:
+                candidates.append(Path(self._bin).resolve().parent.parent / "openclaw" / "openclaw.mjs")
+            except Exception:  # noqa: BLE001
+                pass
+        # ② 从本文件向上逐级找 node_modules(不依赖 CWD / 不强依赖 OPENCLAW_BIN)
+        for parent in Path(__file__).resolve().parents:
+            candidates.append(parent / "node_modules" / "openclaw" / "openclaw.mjs")
+        for c in candidates:
+            try:
+                if c.is_file():
+                    return c
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
     def _resolve_argv_prefix(self) -> list[str]:
         """命令前缀:非 Windows = [bin];Windows = [node, openclaw.mjs](绕过 sh shim)。
 
-        从 OPENCLAW_BIN(通常 <repo>/node_modules/.bin/openclaw)推导
-        <repo>/node_modules/openclaw/openclaw.mjs(#!/usr/bin/env node 入口)。
+        Windows CreateProcess 不识别无扩展名的 POSIX sh shim(`node_modules/.bin/openclaw`)→
+        WinError 2/193。故 Windows 下解析出 `openclaw.mjs` 用 `node` 直跑;
         找不到 mjs / 非 Windows 时原样用 self._bin。详 docs/issues/windows-real-pipeline-runnability.md。
         """
         if sys.platform != "win32":
             return [self._bin]
-        try:
-            # .bin/openclaw → ../../openclaw/openclaw.mjs
-            mjs = Path(self._bin).resolve().parent.parent / "openclaw" / "openclaw.mjs"
-            if mjs.is_file():
-                node = shutil.which("node") or "node"
-                log.info("Windows: openclaw via node %s", mjs)
-                return [node, str(mjs)]
-            log.warning("openclaw.mjs not found at %s; fallback to bin %s", mjs, self._bin)
-        except Exception as e:  # noqa: BLE001
-            log.warning("resolve openclaw.mjs failed: %s; fallback to bin", e)
+        mjs = self._find_openclaw_mjs()
+        if mjs is not None:
+            node = shutil.which("node") or "node"
+            log.info("Windows: openclaw via node %s", mjs)
+            return [node, str(mjs)]
+        log.warning("openclaw.mjs not found (bin=%s); fallback to bare bin", self._bin)
         return [self._bin]
 
     def _resolve_default_model(self) -> str:

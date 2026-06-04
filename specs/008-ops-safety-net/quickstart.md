@@ -40,8 +40,7 @@ uv run --directory apps/web-backend python -m pytest tests/orchestrator/test_v1_
 # 起 admin-backend(secrets 单源,web 依赖它拉 key)
 uv run --directory apps/admin-backend uvicorn app.main:app --port 8100 &
 
-# 起 web-backend(Windows 不加 --reload;⚠ 必须设 OPENCLAW_BIN,见下"环境约束")
-OPENCLAW_BIN="$PWD/node_modules/.bin/openclaw" \
+# 起 web-backend(Windows 不加 --reload;openclaw.mjs 现由代码自动定位,无需手动设 OPENCLAW_BIN)
 V2_PROMPT_MODE=envelope V2_FANOUT=on \
 V2_BUDGET_CAP=30000 V2_ROLLING_SUMMARY=on V2_SUMMARY_THRESHOLD=6 V2_YESMAN_DEFENSE=on \
 uv run --directory apps/web-backend uvicorn app.main:app --port 8000 &
@@ -78,11 +77,12 @@ unset V2_BUDGET_CAP V2_ROLLING_SUMMARY V2_SUMMARY_THRESHOLD V2_YESMAN_DEFENSE
   (事件回读不到)—— 二者由组件测试(rolling 6 + yesman 3 绿)证。要视觉实证 rolling,
   需调高 cap 让任务多跑几步、发言累积过阈。
 
-**⚠ Windows 环境前置(关键,否则每 turn 即 WinError 2)**:
-- 必须设 `OPENCLAW_BIN=<repo>/node_modules/.bin/openclaw`。否则 `agent_backend._resolve_argv_prefix`
-  从裸默认 `"openclaw"` 推不出 `node_modules/openclaw/openclaw.mjs` → fallback 裸 `openclaw` →
-  Windows `CreateProcess` 不识别无扩展名 sh shim → `[WinError 2]`,每个 agent.start 立即 agent.failed,
-  observer 空转 stagnation,无任何真产物。详 `docs/issues/windows-real-pipeline-runnability.md`。
+**Windows openclaw spawn(已在代码根治,无需手动设环境变量)**:
+- P8 e2e 首次踩坑:不设 `OPENCLAW_BIN` 时裸默认 `"openclaw"` 推不出 `openclaw.mjs` → fallback 裸 bin →
+  Windows `CreateProcess` 不识别无扩展名 sh shim → `[WinError 2]`,每 turn 立即失败、observer 空转。
+- **已修复**:`agent_backend._find_openclaw_mjs` 现从本文件向上逐级找 `node_modules/openclaw/openclaw.mjs`
+  (不依赖 CWD / 不强依赖 `OPENCLAW_BIN`),Windows 自动 `node openclaw.mjs`。手动设 `OPENCLAW_BIN` 仍作显式 override。
+  测试:`tests/orchestrator/test_agent_backend_bin.py`(5 绿)。
 
 **其他**:
 - budget 触顶的「中途」时机受 provider 单步 token 量波动影响(同 P6 耗时 LLM variance);

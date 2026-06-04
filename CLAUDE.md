@@ -198,8 +198,9 @@ Tests: `apps/web-backend/tests/orchestrator/test_p8_{budget(8),rolling(6),yesman
 关键:四 flag 全默认关 ⇒ 逐字段 = P7(零回归);budget 软着陆软停(挡新 turn 不取消运行中,产物保留);
       rolling 反向减 prompt token,与 budget 互补;yesman 注入一处覆盖两条 review 路径;
       `CoordinatorIntervene.kind` Literal 早已含 `budget` → 零 schema 改动。
-      T018 budget 轨真 LLM **实测通过**(task `tsk_13bdd9a288fe`/minimax;先修 Windows 环境阻塞:
-      须设 `OPENCLAW_BIN=<repo>/node_modules/.bin/openclaw`,否则裸 `openclaw` CreateProcess WinError 2 每 turn 失败)。
+      T018 budget 轨真 LLM **实测通过**(task `tsk_13bdd9a288fe`/minimax)。顺带根治 Windows 真跑阻塞:
+      `agent_backend._find_openclaw_mjs` 从本文件向上找 `node_modules/openclaw/openclaw.mjs` 自动 `node` 直跑
+      (旧裸 `openclaw` → CreateProcess WinError 2 每 turn 失败);测试 `test_agent_backend_bin.py`(5 绿)。
       **v2 群聊化路线图 P1–P8 全部落地。**
 
 Previously shipped (still authoritative for code):

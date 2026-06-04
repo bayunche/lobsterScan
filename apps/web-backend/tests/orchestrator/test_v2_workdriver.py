@@ -160,6 +160,13 @@ async def test_v2_subscription_drives_8step_closed_loop(tmp_outputs_dir, monkeyp
 
     # 加速 observer 轮询
     monkeypatch.setattr(coordinator_observer, "OBSERVER_TICK_SEC", 0.02)
+    # 隔离 reviewer 质量轨:不打真 backend(否则 artifact.update→_reviewer_quality_review→
+    # _quick_review→run_agent_turn 会真 spawn openclaw,本机无 LLM/secrets 时挂起到 timeout)。
+    from app.orchestrator import pipeline as _pl
+
+    async def _fake_qr(s, run, state=None):  # type: ignore[no-untyped-def]
+        return {"accept": True, "comment": "OK", "reason": None}
+    monkeypatch.setattr(_pl, "_quick_review", _fake_qr)
 
     events_path = tmp_outputs_dir / "data" / "outputs" / "tsk_loop" / "events.jsonl"
 
