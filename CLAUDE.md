@@ -181,7 +181,7 @@ Active spec-driven feature: **P8 — 运营兜底(budget hard-cap + rolling summ
 - Research:   `specs/008-ops-safety-net/research.md` (5 决策 + 现状核实)
 - Data model: `specs/008-ops-safety-net/data-model.md` (4 flag + spent_tokens/budget_exceeded + 折叠算法 + yesman 块)
 - Quickstart: `specs/008-ops-safety-net/quickstart.md` (pytest 三轨 + 零回归 + 1 次真 LLM 端到端)
-- Tasks:      `specs/008-ops-safety-net/tasks.md` (18/19;T018 真 LLM 端到端因环境网络阻 deferred,脚本/步骤就位)
+- Tasks:      `specs/008-ops-safety-net/tasks.md` (19/19;T018 budget 轨真 LLM 实测通过 task `tsk_13bdd9a288fe`:partial/产物保留/触顶后新环节=0/budget 脱敏;rolling 折叠+yesman 文本由组件测试证)
 - Design:     `docs/superpowers/specs/2026-06-02-p8-ops-safety-net-design.md`
 - Constitution: `.specify/memory/constitution.md` (v1.1.0;P8 **无需新宪章修订** — 原则 IV 明列「预算逼近发声」为合法 observer 职责;budget 纯规则 + 复用 gatekeeper / rolling 默认纯规则 / yesman prompt 工程)
 - (contracts/ skipped — 复用 P1 v2 事件 schema;`CoordinatorIntervene.kind` 的 Literal 已含 `budget`,无 schema 改动)
@@ -197,7 +197,9 @@ Tests: `apps/web-backend/tests/orchestrator/test_p8_{budget(8),rolling(6),yesman
       + `test_v1_regression.py` 扩 P8 零回归 4 项。后端全量 **162 passed**(原 141 + P8 21,零回归)。
 关键:四 flag 全默认关 ⇒ 逐字段 = P7(零回归);budget 软着陆软停(挡新 turn 不取消运行中,产物保留);
       rolling 反向减 prompt token,与 budget 互补;yesman 注入一处覆盖两条 review 路径;
-      `CoordinatorIntervene.kind` Literal 早已含 `budget` → 零 schema 改动。T018 真 LLM deferred(同 P7 CDP 环境约束)。
+      `CoordinatorIntervene.kind` Literal 早已含 `budget` → 零 schema 改动。
+      T018 budget 轨真 LLM **实测通过**(task `tsk_13bdd9a288fe`/minimax;先修 Windows 环境阻塞:
+      须设 `OPENCLAW_BIN=<repo>/node_modules/.bin/openclaw`,否则裸 `openclaw` CreateProcess WinError 2 每 turn 失败)。
       **v2 群聊化路线图 P1–P8 全部落地。**
 
 Previously shipped (still authoritative for code):

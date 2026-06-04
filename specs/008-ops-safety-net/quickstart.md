@@ -37,15 +37,17 @@ uv run --directory apps/web-backend python -m pytest tests/orchestrator/test_v1_
 > **用 POST 返回的真实 `task_id` 轮询,不读到真实产物不声称已验证**(working-agreement)。
 
 ```bash
-# 起后端(Windows 不加 --reload)
+# 起 admin-backend(secrets 单源,web 依赖它拉 key)
+uv run --directory apps/admin-backend uvicorn app.main:app --port 8100 &
+
+# 起 web-backend(Windows 不加 --reload;⚠ 必须设 OPENCLAW_BIN,见下"环境约束")
+OPENCLAW_BIN="$PWD/node_modules/.bin/openclaw" \
+V2_PROMPT_MODE=envelope V2_FANOUT=on \
+V2_BUDGET_CAP=30000 V2_ROLLING_SUMMARY=on V2_SUMMARY_THRESHOLD=6 V2_YESMAN_DEFENSE=on \
 uv run --directory apps/web-backend uvicorn app.main:app --port 8000 &
 
-# 开三能力 + 设很低预算(让任务跑几步就触顶),走 v2 envelope 路径
-export V2_PROMPT_MODE=envelope V2_FANOUT=on
-export V2_BUDGET_CAP=120000 V2_ROLLING_SUMMARY=on V2_SUMMARY_THRESHOLD=8 V2_YESMAN_DEFENSE=on
-# (cap 数值按实测 provider 单步 token 量调,目标:5 分钟档跑到中途触顶)
-
-# 提交任务(取响应里的真实 task_id),SSE 订阅观察群聊
+# 提交任务(payload 写文件用 -d @file 避免 shell 中文转义),取响应里的真实 task_id
+curl -s -X POST http://127.0.0.1:8000/api/tasks -H 'Content-Type: application/json' -d @task.json
 # 然后读 data/outputs/<真实task_id>/{task.json,chat.jsonl,events.jsonl} 核对
 ```
 
@@ -65,9 +67,25 @@ unset V2_BUDGET_CAP V2_ROLLING_SUMMARY V2_SUMMARY_THRESHOLD V2_YESMAN_DEFENSE
 
 ---
 
-## 3. 已知环境约束(诚实标注)
+## 3. 实测结果 + 已知环境约束(诚实标注)
 
-- 真 LLM 端到端依赖网络 + provider 配额;若环境受阻(同 P7 CDP / deepseek 历史),
-  真 LLM 验证可 deferred,**测试级三轨 + 零回归为主证**,并如实标注未实测项。
+**✅ budget 轨已真 LLM 实测通过**(2026-06-02,task `tsk_13bdd9a288fe`,minimax):
+- `status=partial`(非 failed)/ `material_parsing` success + 产物 7781B 保留 /
+  spent_tokens 越 30000 cap → emit `intervene(kind=budget)` /
+  触顶后 structure/upward/copywriting/html/video/review **全 skipped(SC-002 新环节=0)** /
+  budget 发声脱敏无 token·id 泄漏(SC-003) / reviewer.verdict 带 yesman on 跑通未报错。
+- **未视觉实证**:rolling 折叠(本次仅 ~2 发言 < 阈值 6,需更长任务触发)+ yesman prompt 文本
+  (事件回读不到)—— 二者由组件测试(rolling 6 + yesman 3 绿)证。要视觉实证 rolling,
+  需调高 cap 让任务多跑几步、发言累积过阈。
+
+**⚠ Windows 环境前置(关键,否则每 turn 即 WinError 2)**:
+- 必须设 `OPENCLAW_BIN=<repo>/node_modules/.bin/openclaw`。否则 `agent_backend._resolve_argv_prefix`
+  从裸默认 `"openclaw"` 推不出 `node_modules/openclaw/openclaw.mjs` → fallback 裸 `openclaw` →
+  Windows `CreateProcess` 不识别无扩展名 sh shim → `[WinError 2]`,每个 agent.start 立即 agent.failed,
+  observer 空转 stagnation,无任何真产物。详 `docs/issues/windows-real-pipeline-runnability.md`。
+
+**其他**:
 - budget 触顶的「中途」时机受 provider 单步 token 量波动影响(同 P6 耗时 LLM variance);
   cap 数值需按实测微调,SC-002 的「新环节数为 0」用 events.jsonl 客观判定,不靠耗时。
+- 正在运行的 turn 在触顶时允许跑完(其成果保留),只挡**新** turn —— 故实测里 `point_extraction`
+  可能停在 `running`(它在 budget tick 前已过短路检查起跑),其余步才是被 `budget_exceeded` 挡住 skipped。

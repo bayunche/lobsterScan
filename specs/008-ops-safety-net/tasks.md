@@ -89,7 +89,7 @@
 
 - [X] T016 在 `apps/web-backend/tests/orchestrator/test_v1_regression.py` 扩充:断言三 flag unset(默认)下 —— `_transcript_block` 输出与 P5 字段级一致、`QUICK_REVIEW_PROMPT` 注入后文本与 P7 一致、observer 无 budget 干预、`force_run_v2` 不短路(字段级零回归,FR-002/SC-001)
 - [X] T017 跑全量 `pytest tests/orchestrator/ -q` 确认零回归(≥ T001 基线数 + P8 新增)且三 P8 测试文件全绿
-- [ ] T018 [P] ⏸ **DEFERRED(环境网络受阻)** 真 LLM 端到端(按 quickstart §2):开三 flag + 低 `V2_BUDGET_CAP` 跑一次真任务,用 POST 返回的**真实 task_id** 读 `data/outputs/<task_id>/{task.json,chat.jsonl,events.jsonl}` 核对 SC-002/003/004/005。脚本/步骤在 quickstart §2 就位;同 P7 CDP / deepseek 历史环境约束,未实跑——测试级三轨(19 绿)+ T016 零回归为主证,**未声称真 LLM 已验证**
+- [X] T018 [P] ✅ **budget 轨真 LLM 实测通过**(task `tsk_13bdd9a288fe`,minimax)。先修环境阻塞:Windows 需设 `OPENCLAW_BIN=<repo>/node_modules/.bin/openclaw`,否则 `_resolve_argv_prefix` 推不出 `openclaw.mjs` → fallback 裸 `openclaw` → CreateProcess WinError 2(每 turn 即失败)。设后 agent 真跑。实测核对(读真实产物):`status=partial`(FR-009 非 failed)/ `material_parsing` success + 产物 7781B 保留(FR-010)/ spent_tokens 越 30000 cap → emit `intervene(kind=budget)` / **触顶后 structure/upward/copywriting/html/video/review 全 skipped(SC-002 新环节=0)** / budget 发声脱敏无 token·id 泄漏(SC-003)/ reviewer.verdict 带 yesman on 跑通未报错。**未视觉实证**:rolling 折叠(本次仅 ~2 发言 < 阈值,需长任务)+ yesman prompt 文本(事件回读不到)——二者由组件测试(rolling 6 + yesman 3 绿)证
 - [X] T019 [P] 更新 `CLAUDE.md` SPECKIT 块(P8 标 ✅ Implemented + 实现位置 + 测试数 + 诚实标注 T018 实测状态)与 `docs/开发文档.md` §9.4 路线图表 P8 行(标已落地)
 
 ---
